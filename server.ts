@@ -267,7 +267,9 @@ async function run() {
   await startServer();
 }
 
-export async function startServer() {
+export async function createApp(options: { listen?: boolean; serveFrontend?: boolean } = {}) {
+  const shouldListen = options.listen !== false;
+  const shouldServeFrontend = options.serveFrontend !== false;
   const app = express();
   const requestedPort = PUBLIC_PORT;
 
@@ -2554,13 +2556,13 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (shouldServeFrontend && process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (shouldServeFrontend) {
     // Serve the static bundle with correct caching (hashed assets immutable,
     // SPA shell revalidated) instead of the previous un-cached defaults.
     serveStaticWithCache(app, path.join(process.cwd(), 'dist'));
@@ -2572,16 +2574,19 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   const bindHost = isAuthority ? "127.0.0.1" : "0.0.0.0";
   const bindPort = isAuthority ? INTERNAL_PORT : requestedPort;
 
-  const server = app.listen(bindPort, bindHost, () => {
-    console.log(`KS-HackNova 2026 Server running on http://${bindHost}:${bindPort}`);
-  });
+  let server: ReturnType<typeof app.listen> | null = null;
+  if (shouldListen) {
+    server = app.listen(bindPort, bindHost, () => {
+      console.log(`KS-HackNova 2026 Server running on http://${bindHost}:${bindPort}`);
+    });
 
-  server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") {
-      console.warn(`Port ${bindPort} is already in use on ${bindHost}. You may already have a server running.`);
-    }
-    console.error("Failed to start server:", err);
-  });
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        console.warn(`Port ${bindPort} is already in use on ${bindHost}. You may already have a server running.`);
+      }
+      console.error("Failed to start server:", err);
+    });
+  }
 
   // Graceful shutdown: flush pending registrations/check-ins to disk before the
   // process exits so nothing is lost on a deploy or restart, then exit quickly.
@@ -2591,13 +2596,17 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     shuttingDown = true;
     console.log("\nShutting down — flushing pending data to disk…");
     try { persistNow(); } catch { /* best-effort */ }
-    try { server.close(); } catch { /* best-effort */ }
+    try { server?.close(); } catch { /* best-effort */ }
     setTimeout(() => process.exit(0), 150);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-  return server;
+  if (shouldListen) {
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  }
+  return shouldListen ? server : app;
 }
+
+export const startServer = () => createApp();
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   run();
