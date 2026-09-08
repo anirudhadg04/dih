@@ -68,6 +68,34 @@ create table if not exists public.registration_backup_rows (
   team_status text not null
 );
 
+create table if not exists public.team_number_counter (
+  id boolean primary key default true check (id),
+  next_number integer not null default 0
+);
+
+insert into public.team_number_counter (id, next_number)
+values (true, 0)
+on conflict (id) do nothing;
+
+create or replace function public.allocate_team_number()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare allocated_number integer;
+begin
+  update public.team_number_counter
+  set next_number = next_number + 1
+  where id = true
+  returning next_number into allocated_number;
+  return allocated_number;
+end;
+$$;
+
+revoke all on function public.allocate_team_number() from public;
+grant execute on function public.allocate_team_number() to service_role;
+
 alter table public.teams enable row level security;
 alter table public.participants enable row level security;
 alter table public.registration_backup_rows enable row level security;

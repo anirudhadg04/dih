@@ -12,6 +12,7 @@ import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
+import { allocateTeamNumber, isSupabaseConfigured, listTeams, saveTeam } from "./src/server/supabaseStore";
 
 declare global {
   namespace Express {
@@ -731,27 +732,32 @@ export async function createApp(options: { listen?: boolean; serveFrontend?: boo
   });
 
   // Teams & Registrations
-  app.get("/api/teams", (req, res) => {
-    // Calculate live real-time statistics
-    const totalParticipants = teams.reduce((acc, t) => acc + t.members.length, 0);
-    const uniqueColleges = new Set(teams.flatMap(t => t.members.map(m => m.college))).size;
-    const totalCapacity = cmsConfig.maxRegistrations || 350;
-    const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
+  app.get("/api/teams", async (req, res) => {
+    try {
+      const sourceTeams = isSupabaseConfigured() ? await listTeams() : teams;
+      // Calculate live real-time statistics
+      const totalParticipants = sourceTeams.reduce((acc, t) => acc + t.members.length, 0);
+      const uniqueColleges = new Set(sourceTeams.flatMap(t => t.members.map(m => m.college))).size;
+      const totalCapacity = cmsConfig.maxRegistrations || 350;
+      const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
 
-    const safeTeams = teams.map((team) => sanitizeTeamForClient(team));
-    res.json({
-      success: true,
-      teams: safeTeams,
-      freezeRegistrations: !!cmsConfig.freezeRegistrations,
-      registrationOpen: cmsConfig.registrationOpen && !cmsConfig.freezeRegistrations,
-      stats: {
-        registeredCount: totalParticipants,
-        collegesCount: uniqueColleges,
-        seatsLeft,
-        totalSeats: totalCapacity,
-        totalTeams: teams.length
-      }
-    });
+      const safeTeams = sourceTeams.map((team) => sanitizeTeamForClient(team));
+      res.json({
+        success: true,
+        teams: safeTeams,
+        freezeRegistrations: !!cmsConfig.freezeRegistrations,
+        registrationOpen: cmsConfig.registrationOpen && !cmsConfig.freezeRegistrations,
+        stats: {
+          registeredCount: totalParticipants,
+          collegesCount: uniqueColleges,
+          seatsLeft,
+          totalSeats: totalCapacity,
+          totalTeams: sourceTeams.length
+        }
+      });
+    } catch (error: any) {
+      res.status(503).json({ success: false, error: "Participant database is temporarily unavailable." });
+    }
   });
 
   // Gate Check-in / Venue Entry Endpoint for Admin Scanner
@@ -793,7 +799,7 @@ export async function createApp(options: { listen?: boolean; serveFrontend?: boo
   });
 
   // Secure Participant Login Endpoint
-  app.post("/api/participant-login", (req, res) => {
+  app.post("/api/participant-login", async (req, res) => {
     try {
       const { identifier, password } = req.body;
       if (!identifier || !password) {
@@ -803,7 +809,8 @@ export async function createApp(options: { listen?: boolean; serveFrontend?: boo
       const cleanId = String(identifier).trim().toLowerCase();
       const cleanPass = String(password).trim();
 
-      const team = teams.find(t => 
+      const sourceTeams = isSupabaseConfigured() ? await listTeams() : teams;
+      const team = sourceTeams.find(t => 
         t.id.toLowerCase() === cleanId ||
         (t.regNumber && t.regNumber.toLowerCase() === cleanId) ||
         (t.teamName && t.teamName.toLowerCase() === cleanId) ||
@@ -870,7 +877,9 @@ export async function createApp(options: { listen?: boolean; serveFrontend?: boo
         });
       }
 
-      const teamIndex = ++nextTeamNumber;
+      const teamIndex = isSupabaseConfigured()
+        ? await allocateTeamNumber()
+        : ++nextTeamNumber;
       const teamId = `AN-${String(teamIndex).padStart(3, '0')}`;
       const regNumber = `CODE-2026-${String(teamIndex).padStart(3, '0')}`;
 
@@ -932,24 +941,38 @@ export async function createApp(options: { listen?: boolean; serveFrontend?: boo
         paymentScreenshot: paymentScreenshot || null
       };
 
-      // Registration data is also written to a lightweight, append-only CSV
+      if (isSupabaseConfigured()) {
+        try {
+          await saveTeam(newTeam);
+        } catch (databaseError) {
+          console.error("[SUPABASE] Registration write failed; registration was not accepted:", databaseError);
+          return res.status(503).json({
+            success: false,
+            error: "Registration database is temporarily unavailable. Please retry in a moment; no registration has been recorded."
+          });
+        }
+      }
+
+      // Local registration data is also written to a lightweight, append-only CSV
       // before we report success. This gives organisers a recoverable list of
       // every participant even if the Admin Portal is unavailable later.
       //
       // Do this before mutating `teams`: a failed backup write must never leave
       // a registration that the participant thinks has completed successfully.
-      try {
-        await appendParticipantRegistrationBackup(newTeam);
-      } catch (backupError) {
-        console.error("[BACKUP] Registration CSV write failed; registration was not accepted:", backupError);
-        return res.status(503).json({
-          success: false,
-          error: "Registration backup is temporarily unavailable. Please retry in a moment; no registration has been recorded."
-        });
+      if (!isSupabaseConfigured()) {
+        try {
+          await appendParticipantRegistrationBackup(newTeam);
+        } catch (backupError) {
+          console.error("[BACKUP] Registration CSV write failed; registration was not accepted:", backupError);
+          return res.status(503).json({
+            success: false,
+            error: "Registration backup is temporarily unavailable. Please retry in a moment; no registration has been recorded."
+          });
+        }
       }
 
       teams.push(newTeam);
-      markDirty(); // flush registration to disk promptly
+      if (!isSupabaseConfigured()) markDirty(); // flush local registration to disk promptly
 
       // Automated registration email trigger for all team members
       const allTeamEmails = [

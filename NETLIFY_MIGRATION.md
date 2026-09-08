@@ -6,22 +6,26 @@ The `netlify-supabase-migration` branch contains the deployment foundation:
   Netlify Function.
 - `netlify/functions/api.ts` exposes the existing Express routes through the
   function adapter.
-- `supabase/schema.sql` defines the durable registration tables and private
-  payment-screenshot bucket.
+- `supabase/schema.sql` defines the durable registration tables, a database-side
+  team-number allocator, and private payment-screenshot bucket.
 - `.env.netlify.example` lists the server-only configuration.
 
 ## Important status
 
-The function adapter is a compatibility bridge. The existing Express route
-implementation still uses its in-process arrays and local JSON/CSV persistence.
-That is appropriate for the current VPS deployment, but it is **not yet safe as
-the primary production datastore on Netlify**, because function instances are
-stateless and their local filesystem is temporary.
+The registration and participant-login paths now use Supabase when the server
+environment contains both `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Team
+records, participant rows, payment screenshots, and durable backup rows are
+written there, with rollback if the backup write fails. Without those variables,
+the local JSON/CSV implementation remains active for development and the VPS.
 
-Before switching the public site to the Netlify function, migrate the route
-families to Supabase transactions and storage, starting with registration,
-participant login, admin login, teams, and payment screenshots. The frontend
-can keep its existing `/api/...` URLs because `netlify.toml` preserves them.
+The function adapter is still a compatibility bridge for the remaining route
+families. Those routes continue to use in-process arrays and local persistence,
+so the app is **not yet safe as a complete production migration on Netlify**.
+
+Before switching the public site to the Netlify function, migrate the remaining
+admin, check-in, submissions, judging, CMS, and session route families to
+Supabase-backed storage. The frontend can keep its existing `/api/...` URLs
+because `netlify.toml` preserves them.
 
 ## Supabase setup
 

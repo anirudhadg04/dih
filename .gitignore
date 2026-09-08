@@ -8,3 +8,6 @@ coverage/
 !.env.example
 backups/*
 !backups/.gitkeep
+
+# Local Netlify folder
+.netlify
