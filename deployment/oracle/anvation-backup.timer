@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the ANVATION local backup every day
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=anvation-backup.service
+
+[Install]
+WantedBy=timers.target

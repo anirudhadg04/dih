@@ -34,6 +34,14 @@ with thousands of concurrent visitors**, and what has already been wired in.
 
 6. **Multi-core (cluster) mode** — *optional*, see below.
 
+### Participant-registration backup
+
+Every successful registration appends one row per participant to
+`backups/participant-registration-backup.csv` before the API returns success.
+It is server-side, Excel-compatible, and omits access passwords and payment
+screenshots. On production, configure `DATA_DIR` so generated data is kept
+outside the deployed code directory.
+
 ## Standard deployment (recommended baseline)
 
 Serve the pre-built `dist/` behind a reverse proxy that terminates TLS:
@@ -142,3 +150,7 @@ shape this architecture is designed for.
 
 > Existing `.env` values are only read if the matching OS env var is not already
 > set, so `CLUSTER_WORKERS` / `INTERNAL_PORT` in `.env` will be respected.
+
+For the complete Oracle Cloud Always Free setup, including the systemd restart
+service, Caddy HTTPS configuration, daily local snapshots, and authenticated
+CSV retrieval, see [`deployment/oracle/README.md`](deployment/oracle/README.md).

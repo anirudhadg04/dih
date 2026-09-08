@@ -1,8 +1,10 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
+import crypto from "node:crypto";
 import httpx from "node:http";
 import os from "node:os";
+import { pathToFileURL } from "node:url";
 import nodemailer from "nodemailer";
 import QRCode from "qrcode";
 import compression from "compression";
@@ -10,6 +12,23 @@ import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
+
+declare global {
+  namespace Express {
+    interface Request {
+      session?: {
+        id?: string;
+        type?: "admin" | "participant";
+        role?: string;
+        email?: string;
+        username?: string;
+        name?: string;
+        teamId?: string;
+        expiresAt?: number;
+      };
+    }
+  }
+}
 // Minimal .env loader (no dotenv dependency). Loads SMTP_* / MAIL_FROM (and any
 // other KEY=VALUE) from a local `.env` file so real email delivery can be
 // configured without extra packages. Never overrides already-set env vars.
@@ -248,9 +267,9 @@ async function run() {
   await startServer();
 }
 
-async function startServer() {
+export async function startServer() {
   const app = express();
-  const requestedPort = Number(process.env.PORT) || DEFAULT_PORT;
+  const requestedPort = PUBLIC_PORT;
 
   app.use(express.json({ limit: "10mb" }));
 
@@ -292,6 +311,143 @@ async function startServer() {
     }
     next();
   });
+
+  const AUTH_COOKIE = "anvation_session";
+  const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+  const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_BOOTSTRAP_PASSWORD || "change-me-in-dev-only";
+  const sessionStore = new Map<string, { user: { id: string; type: "admin" | "participant"; role?: string; email?: string; username?: string; name?: string; teamId?: string; expiresAt: number; }; expiresAt: number }>();
+
+  function sanitizeAdminUser(user: Partial<AdminUser> | null | undefined) {
+    if (!user) return user;
+    const { password: _password, ...rest } = user as any;
+    return rest;
+  }
+
+  function sanitizeTeamForClient(team: any) {
+    if (!team) return team;
+    const { accessPassword: _accessPassword, ...rest } = team;
+    return rest;
+  }
+
+  function normalizeStoredPassword(value?: string): string | undefined {
+    if (!value) return undefined;
+    const password = String(value).trim();
+    if (!password) return undefined;
+    return password.startsWith("pbkdf2_sha256$") ? password : hashPassword(password);
+  }
+
+  function hashPassword(password: string): string {
+    const salt = crypto.randomBytes(16).toString("hex");
+    const derived = crypto.pbkdf2Sync(password, salt, 250000, 32, "sha256").toString("hex");
+    return `pbkdf2_sha256$${salt}$${derived}`;
+  }
+
+  function verifyPassword(password: string, storedHash?: string): boolean {
+    if (!storedHash || !password) return false;
+    if (!storedHash.startsWith("pbkdf2_sha256$")) {
+      return storedHash === password;
+    }
+    const [, salt, hash] = storedHash.split("$");
+    if (!salt || !hash) return false;
+    const derived = crypto.pbkdf2Sync(password, salt, 250000, 32, "sha256").toString("hex");
+    return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(derived, "hex"));
+  }
+
+  function getClientIp(req: any) {
+    return String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.ip || "unknown");
+  }
+
+  function createSession(user: any) {
+    const sid = crypto.randomBytes(24).toString("hex");
+    const record = { user: { ...user, expiresAt: Date.now() + SESSION_TTL_MS }, expiresAt: Date.now() + SESSION_TTL_MS };
+    sessionStore.set(sid, record);
+    return sid;
+  }
+
+  function getSessionFromRequest(req: any) {
+    const cookieRaw = req.headers.cookie || "";
+    const match = cookieRaw.split(";").map((v: string) => v.trim()).find((v: string) => v.startsWith(`${AUTH_COOKIE}=`));
+    const sid = match ? decodeURIComponent(match.slice(AUTH_COOKIE.length + 1)) : null;
+    if (!sid) return null;
+    const session = sessionStore.get(sid);
+    if (!session) return null;
+    if (Date.now() > session.expiresAt) {
+      sessionStore.delete(sid);
+      return null;
+    }
+    return session;
+  }
+
+  function setAuthCookie(res: any, sid: string) {
+    const secure = process.env.NODE_ENV === "production";
+    res.cookie(AUTH_COOKIE, sid, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure,
+      maxAge: SESSION_TTL_MS,
+      path: "/",
+    });
+  }
+
+  function clearAuthCookie(res: any) {
+    res.clearCookie(AUTH_COOKIE, { path: "/", httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
+  }
+
+  function requireAuth(req: any, res: any, next: any) {
+    const session = getSessionFromRequest(req);
+    if (!session) {
+      return res.status(401).json({ success: false, error: "Authentication required." });
+    }
+    req.session = session.user;
+    next();
+  }
+
+  function requireRole(roles: string[]) {
+    return (req: any, res: any, next: any) => {
+      const session = getSessionFromRequest(req);
+      if (!session) {
+        return res.status(401).json({ success: false, error: "Authentication required." });
+      }
+      const userRole = String(session.user.role || "").toUpperCase();
+      if (!roles.map((r) => r.toUpperCase()).includes(userRole)) {
+        return res.status(403).json({ success: false, error: "Forbidden: insufficient privileges." });
+      }
+      req.session = session.user;
+      next();
+    };
+  }
+
+  const requireAdmin = requireRole(["ADMIN", "REGISTRATION_MANAGER", "CONTENT_MANAGER", "SUPER_ADMIN", "JUDGE", "CHECKIN_STAFF"]);
+  const requireSuperAdmin = requireRole(["SUPER_ADMIN"]);
+
+  function requireTeamAccess(req: any, res: any, next: any) {
+    const session = getSessionFromRequest(req);
+    if (!session) return res.status(401).json({ success: false, error: "Authentication required." });
+    const teamId = String(req.params?.teamId || req.body?.teamId || req.query?.teamId || "");
+    const userTeamId = session.user.teamId || "";
+    const isAdminRole = ["ADMIN", "REGISTRATION_MANAGER", "CONTENT_MANAGER", "SUPER_ADMIN", "JUDGE", "CHECKIN_STAFF"].includes(String(session.user.role || "").toUpperCase());
+    if (!teamId && !isAdminRole) {
+      return res.status(400).json({ success: false, error: "Team ID is required." });
+    }
+    if (teamId && userTeamId && teamId.toLowerCase() !== userTeamId.toLowerCase() && !isAdminRole) {
+      return res.status(403).json({ success: false, error: "Forbidden: team access denied." });
+    }
+    req.session = session.user;
+    next();
+  }
+
+  function requireSameOriginForMutations(req: any, res: any, next: any) {
+    if (["GET", "HEAD", "OPTIONS"].includes((req.method || "GET").toUpperCase())) return next();
+    const origin = String(req.headers.origin || "");
+    const referer = String(req.headers.referer || "");
+    const host = req.headers.host || "";
+    const trustedOrigin = origin && (origin === `http://${host}` || origin === `https://${host}` || origin === `http://localhost:${process.env.PORT || 3001}` || origin === `http://127.0.0.1:${process.env.PORT || 3001}` || origin === `https://localhost:${process.env.PORT || 3001}`);
+    const trustedReferer = referer && (referer.startsWith(`http://${host}/`) || referer.startsWith(`https://${host}/`) || referer.startsWith("http://localhost:") || referer.startsWith("http://127.0.0.1:"));
+    if (origin && !trustedOrigin && !trustedReferer) {
+      return res.status(403).json({ success: false, error: "Request origin is not trusted." });
+    }
+    next();
+  }
 
   // Global per-IP API throttle — a sane ceiling so a single visitor (or a
   // scripted bot burst) can never pin all the CPU. Each limiter below is
@@ -370,6 +526,151 @@ async function startServer() {
 
   let tickets: SupportTicket[] = [];
 
+  // ===========================================================================
+  // Participant registration CSV backup
+  // ---------------------------------------------------------------------------
+  // This is intentionally an append-only file, rather than a complete rewrite
+  // on every registration. It keeps the write small under registration bursts
+  // and preserves a usable participant ledger if the admin UI is unavailable.
+  // It is a server-side file, not a browser download; see DEPLOYMENT.md for
+  // secure retrieval instructions.
+  // ===========================================================================
+  // Local development keeps data beside the source. Production can set
+  // DATA_DIR=/var/lib/anvation (and optionally BACKUP_DIR) so deploys never
+  // overwrite registrations or backups.
+  const DATA_DIRECTORY = path.resolve((process.env.DATA_DIR || process.cwd()).trim());
+  const PARTICIPANT_BACKUP_DIR = path.resolve((process.env.BACKUP_DIR || path.join(DATA_DIRECTORY, "backups")).trim());
+  const PARTICIPANT_BACKUP_FILE = path.join(PARTICIPANT_BACKUP_DIR, "participant-registration-backup.csv");
+  const PARTICIPANT_BACKUP_HEADERS = [
+    "registration_timestamp",
+    "team_id",
+    "registration_number",
+    "team_name",
+    "track",
+    "participant_id",
+    "participant_name",
+    "role",
+    "email",
+    "phone",
+    "usn",
+    "college",
+    "department",
+    "semester",
+    "gender",
+    "github_url",
+    "linkedin_url",
+    "accommodation_required",
+    "emergency_contact",
+    "payment_utr",
+    "payment_status",
+    "team_status"
+  ];
+
+  // Serialising append operations prevents interleaved rows when many teams
+  // finish registration at nearly the same time. Async I/O keeps the Node
+  // event loop available to receive other requests while a write is pending.
+  let participantBackupWriteQueue: Promise<void> = Promise.resolve();
+
+  const csvCell = (value: unknown): string => {
+    let text = value === null || value === undefined ? "" : String(value);
+    // Avoid CSV/formula injection when this file is opened in Excel or Sheets.
+    if (/^\s*[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  const participantBackupRows = (team: Team): string => team.members.map((member) => {
+    const row = [
+      team.createdAt,
+      team.id,
+      team.regNumber,
+      team.teamName,
+      team.preferredTrack,
+      member.id,
+      member.fullName,
+      member.role,
+      member.email,
+      member.phone,
+      member.usn,
+      member.college,
+      member.department,
+      member.semester,
+      member.gender,
+      member.githubUrl,
+      member.linkedinUrl,
+      member.accommodationRequired,
+      member.emergencyContact,
+      team.paymentUtr,
+      team.paymentStatus,
+      team.status
+    ];
+    return row.map(csvCell).join(",");
+  }).join("\n");
+
+  const participantBackupFileContents = (seedTeams: Team[]): string => {
+    const seedRows = seedTeams
+      .map(participantBackupRows)
+      .filter(Boolean)
+      .join("\n");
+    // UTF-8 BOM means non-ASCII names render correctly when opened in Excel.
+    return `\uFEFF${PARTICIPANT_BACKUP_HEADERS.map(csvCell).join(",")}\n${seedRows}${seedRows ? "\n" : ""}`;
+  };
+
+  const initialiseParticipantRegistrationBackup = () => {
+    fs.mkdirSync(PARTICIPANT_BACKUP_DIR, { recursive: true, mode: 0o700 });
+    const hasData = fs.existsSync(PARTICIPANT_BACKUP_FILE) && fs.statSync(PARTICIPANT_BACKUP_FILE).size > 0;
+    if (hasData) return;
+
+    // When first deployed, seed the CSV from previously persisted teams so the
+    // backup is already complete before it starts receiving new registrations.
+    fs.writeFileSync(
+      PARTICIPANT_BACKUP_FILE,
+      participantBackupFileContents(teams),
+      { encoding: "utf8", mode: 0o600 }
+    );
+    console.log(`[BACKUP] Participant registration CSV initialised: ${PARTICIPANT_BACKUP_FILE}`);
+  };
+
+  const appendParticipantRegistrationBackup = (team: Team): Promise<void> => {
+    const rows = participantBackupRows(team);
+    if (!rows) return Promise.resolve();
+
+    const write = async () => {
+      await fs.promises.mkdir(PARTICIPANT_BACKUP_DIR, { recursive: true, mode: 0o700 });
+
+      // A manually deleted/emptied file is rebuilt from the authoritative
+      // in-memory team store before the new team is appended, rather than
+      // silently creating a CSV with no header or historical rows.
+      let needsInitialisation = true;
+      try {
+        needsInitialisation = (await fs.promises.stat(PARTICIPANT_BACKUP_FILE)).size === 0;
+      } catch (error: any) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      if (needsInitialisation) {
+        await fs.promises.writeFile(
+          PARTICIPANT_BACKUP_FILE,
+          participantBackupFileContents(teams),
+          { encoding: "utf8", mode: 0o600 }
+        );
+      }
+
+      await fs.promises.appendFile(PARTICIPANT_BACKUP_FILE, `${rows}\n`, { encoding: "utf8", mode: 0o600 });
+    };
+
+    // Continue processing later registrations even if an earlier write failed;
+    // the caller of the failed registration receives a retryable 503 response.
+    participantBackupWriteQueue = participantBackupWriteQueue.catch(() => undefined).then(write);
+    return participantBackupWriteQueue;
+  };
+
+  app.use((req, res, next) => {
+    if (req.method === "OPTIONS") return next();
+    if (["POST", "PUT", "PATCH", "DELETE"].includes((req.method || "GET").toUpperCase())) {
+      return requireSameOriginForMutations(req, res, next);
+    }
+    next();
+  });
+
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -387,7 +688,7 @@ async function startServer() {
   });
 
   // Toggle Freeze Registration (Admin Control)
-  app.post("/api/admin/toggle-freeze-registration", (req, res) => {
+  app.post("/api/admin/toggle-freeze-registration", requireAdmin, (req, res) => {
     try {
       const { freeze } = req.body;
       cmsConfig.freezeRegistrations = typeof freeze === 'boolean' ? freeze : !cmsConfig.freezeRegistrations;
@@ -407,7 +708,7 @@ async function startServer() {
   });
 
   // Clear / Reset All Registered Teams (Admin Control)
-  app.post("/api/admin/clear-all-teams", (req, res) => {
+  app.post("/api/admin/clear-all-teams", requireSuperAdmin, (req, res) => {
     try {
       const previousCount = teams.length;
       teams = [];
@@ -435,9 +736,10 @@ async function startServer() {
     const totalCapacity = cmsConfig.maxRegistrations || 350;
     const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
 
+    const safeTeams = teams.map((team) => sanitizeTeamForClient(team));
     res.json({
       success: true,
-      teams,
+      teams: safeTeams,
       freezeRegistrations: !!cmsConfig.freezeRegistrations,
       registrationOpen: cmsConfig.registrationOpen && !cmsConfig.freezeRegistrations,
       stats: {
@@ -451,7 +753,7 @@ async function startServer() {
   });
 
   // Gate Check-in / Venue Entry Endpoint for Admin Scanner
-  app.post("/api/teams/:id/check-in", (req, res) => {
+  app.post("/api/teams/:id/check-in", requireAdmin, (req, res) => {
     try {
       const { id } = req.params;
       const index = teams.findIndex(t => 
@@ -476,10 +778,11 @@ async function startServer() {
       teams[index] = team;
       markDirty(); // persist check-in promptly
       console.log(`[GATE PASS SCANNED] Team ${team.id} (${team.teamName}) admitted to venue at ${entryTime}`);
+      const safeTeam = sanitizeTeamForClient(team);
 
       res.json({
         success: true,
-        team,
+        team: safeTeam,
         message: `Team ${team.teamName} (${team.id}) successfully verified and admitted to KSSEM venue!`
       });
     } catch (err: any) {
@@ -491,14 +794,13 @@ async function startServer() {
   app.post("/api/participant-login", (req, res) => {
     try {
       const { identifier, password } = req.body;
-      if (!identifier) {
-        return res.status(400).json({ success: false, error: "Team ID, Registration No, or Email is required" });
+      if (!identifier || !password) {
+        return res.status(400).json({ success: false, error: "Team credentials are required." });
       }
 
-      const cleanId = identifier.trim().toLowerCase();
-      const cleanPass = (password || '').trim();
+      const cleanId = String(identifier).trim().toLowerCase();
+      const cleanPass = String(password).trim();
 
-      // Look up team by: ID (e.g. AN-001, an-001), regNumber (CODE-2026-001), teamName, leaderEmail, or ANY member's email/USN
       const team = teams.find(t => 
         t.id.toLowerCase() === cleanId ||
         (t.regNumber && t.regNumber.toLowerCase() === cleanId) ||
@@ -512,33 +814,30 @@ async function startServer() {
       );
 
       if (!team) {
-        return res.status(404).json({
-          success: false,
-          error: `No registered team found matching "${identifier}". Please double check your Team ID (e.g. AN-001) or Email from your registration slip.`
-        });
+        return res.status(401).json({ success: false, error: "Invalid credentials." });
       }
 
-      // Check passphrase match (accepts exact match, case-insensitive, team.accessPassword, or universal backups)
-      const expectedPass = team.accessPassword || '';
-      const passMatches = 
-        !expectedPass ||
-        cleanPass.toLowerCase() === expectedPass.toLowerCase() ||
-        cleanPass === expectedPass ||
-        cleanPass.toLowerCase() === 'team123' ||
-        cleanPass.toLowerCase() === 'code2026' ||
-        cleanPass.toLowerCase() === 'anvation' ||
-        cleanPass.toLowerCase() === team.id.toLowerCase();
+      const storedHash = team.accessPassword || "";
+      const passMatches = verifyPassword(cleanPass, storedHash);
 
       if (!passMatches) {
-        return res.status(401).json({
-          success: false,
-          error: `Invalid passphrase for Team ${team.id}. Please use the passphrase printed on your registration slip.`
-        });
+        return res.status(401).json({ success: false, error: "Invalid credentials." });
       }
 
+      const sid = createSession({
+        id: team.id,
+        type: 'participant',
+        role: 'PARTICIPANT',
+        teamId: team.id,
+        email: team.leaderEmail,
+        name: team.teamName,
+      });
+      setAuthCookie(res, sid);
+
+      const safeTeam = sanitizeTeamForClient(team);
       res.json({
         success: true,
-        team,
+        team: safeTeam,
         message: `Welcome back, Team ${team.teamName}!`
       });
     } catch (err: any) {
@@ -546,7 +845,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/register", (req, res) => {
+  app.post("/api/register", async (req, res) => {
     try {
       if (cmsConfig.freezeRegistrations || !cmsConfig.registrationOpen) {
         return res.status(403).json({
@@ -620,7 +919,7 @@ async function startServer() {
         regNumber,
         teamName,
         leaderEmail: leader.email,
-        accessPassword,
+        accessPassword: hashPassword(accessPassword),
         preferredTrack: preferredTrack || 'Artificial Intelligence & Machine Learning',
         members: [leaderParticipant, ...formattedMembers],
         status: 'Confirmed',
@@ -630,6 +929,22 @@ async function startServer() {
         paymentStatus: 'Verified',
         paymentScreenshot: paymentScreenshot || null
       };
+
+      // Registration data is also written to a lightweight, append-only CSV
+      // before we report success. This gives organisers a recoverable list of
+      // every participant even if the Admin Portal is unavailable later.
+      //
+      // Do this before mutating `teams`: a failed backup write must never leave
+      // a registration that the participant thinks has completed successfully.
+      try {
+        await appendParticipantRegistrationBackup(newTeam);
+      } catch (backupError) {
+        console.error("[BACKUP] Registration CSV write failed; registration was not accepted:", backupError);
+        return res.status(503).json({
+          success: false,
+          error: "Registration backup is temporarily unavailable. Please retry in a moment; no registration has been recorded."
+        });
+      }
 
       teams.push(newTeam);
       markDirty(); // flush registration to disk promptly
@@ -665,11 +980,12 @@ async function startServer() {
       const uniqueColleges = new Set(teams.flatMap(t => t.members.map(m => m.college))).size;
       const totalCapacity = 350;
       const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
+      const registrationTeam = sanitizeTeamForClient(newTeam);
 
       res.json({
         success: true,
-        team: newTeam,
-        paymentAmount: Number(paymentAmount) || newTeam.members.length * cmsConfig.registrationFee,
+        team: registrationTeam,
+        paymentAmount: Number(paymentAmount) || newTeam.members.length * Number(cmsConfig.registrationFee || 1),
         emailDispatched: true,
         emailRecipients: allTeamEmails.map(e => e.email),
         emailRecords,
@@ -885,7 +1201,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Edit / Update Team Endpoint (Used by Admin & Registration Slip Edit)
-  app.put("/api/teams/:id", (req, res) => {
+  app.put("/api/teams/:id", requireAdmin, (req, res) => {
     try {
       const { id } = req.params;
       const updateData = req.body;
@@ -916,14 +1232,14 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
 
       teams[index] = updatedTeam;
       markDirty();
-      res.json({ success: true, team: updatedTeam, message: "Team updated successfully" });
+      res.json({ success: true, team: sanitizeTeamForClient(updatedTeam), message: "Team updated successfully" });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
   // Delete Team Endpoint
-  app.delete("/api/teams/:id", (req, res) => {
+  app.delete("/api/teams/:id", requireSuperAdmin, (req, res) => {
     const { id } = req.params;
     const initialLen = teams.length;
     teams = teams.filter(t => t.id.toLowerCase() !== id.toLowerCase() && t.regNumber.toLowerCase() !== id.toLowerCase());
@@ -935,7 +1251,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Edit / Update Individual Participant Endpoint
-  app.put("/api/participants/:id", (req, res) => {
+  app.put("/api/participants/:id", requireAdmin, (req, res) => {
     const { id } = req.params;
     const participantData = req.body;
 
@@ -958,7 +1274,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // QR Check-In
-  app.post("/api/checkin", (req, res) => {
+  app.post("/api/checkin", requireAdmin, (req, res) => {
     const { query } = req.body; // Team ID or USN or Email
     if (!query) return res.status(400).json({ success: false, error: "Query required" });
 
@@ -983,7 +1299,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Food Coupon Claim
-  app.post("/api/food-coupon/claim", (req, res) => {
+  app.post("/api/food-coupon/claim", requireAdmin, (req, res) => {
     const { teamId, usn, mealKey } = req.body;
     const team = teams.find(t => t.id === teamId);
     if (!team) return res.status(404).json({ success: false, error: "Team not found" });
@@ -1008,13 +1324,16 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, submissions });
   });
 
-  app.post("/api/submit-project", (req, res) => {
+  app.post("/api/submit-project", requireTeamAccess, (req, res) => {
     try {
       const { teamId, projectTitle, problemStatement, technologyStack, architectureOverview, githubLink, demoVideoUrl, pptUrl, pdfDocUrl, futureScope, track } = req.body;
       if (!teamId || !projectTitle || !githubLink) {
         return res.status(400).json({ success: false, error: "Missing required submission fields" });
       }
 
+      if (req.session?.teamId && teamId && String(teamId).toLowerCase() !== String(req.session.teamId).toLowerCase()) {
+        return res.status(403).json({ success: false, error: "Forbidden: team access denied." });
+      }
       const team = teams.find(t => t.id === teamId);
       const teamName = team ? team.teamName : 'Team ' + teamId;
 
@@ -1061,7 +1380,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, scorecards });
   });
 
-  app.post("/api/scorecards", (req, res) => {
+  app.post("/api/scorecards", requireAdmin, (req, res) => {
     try {
       const { submissionId, teamId, judgeName, innovation = 0, impact = 0, technicalComplexity = 0, presentation = 0, uiUx = 0, scalability = 0, originality = 0, bonusPoints = 0, penalty = 0, feedback } = req.body;
       
@@ -1109,7 +1428,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, announcements });
   });
 
-  app.post("/api/announcements", (req, res) => {
+  app.post("/api/announcements", requireAdmin, (req, res) => {
     const { title, content, category = 'General', urgent } = req.body;
     if (!title || !content) return res.status(400).json({ success: false, error: "Title and content required" });
 
@@ -1126,7 +1445,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, announcement: newAnn });
   });
 
-  app.post("/api/announcements/edit", (req, res) => {
+  app.post("/api/announcements/edit", requireAdmin, (req, res) => {
     const { id, title, content, category, urgent } = req.body;
     const ann = announcements.find(a => a.id === id);
     if (!ann) return res.status(404).json({ success: false, error: "Announcement not found" });
@@ -1139,7 +1458,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, announcement: ann });
   });
 
-  app.post("/api/announcements/delete", (req, res) => {
+  app.post("/api/announcements/delete", requireAdmin, (req, res) => {
     const { id } = req.body;
     announcements = announcements.filter(a => a.id !== id);
     res.json({ success: true, message: "Announcement deleted" });
@@ -1150,7 +1469,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, sponsors });
   });
 
-  app.post("/api/sponsors", (req, res) => {
+  app.post("/api/sponsors", requireAdmin, (req, res) => {
     const { name, category = 'Community', logo, website, description } = req.body;
     if (!name || !website) return res.status(400).json({ success: false, error: "Name and website are required" });
     const newSponsor: Sponsor = {
@@ -1165,7 +1484,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, sponsor: newSponsor });
   });
 
-  app.post("/api/sponsors/edit", (req, res) => {
+  app.post("/api/sponsors/edit", requireAdmin, (req, res) => {
     const { id, name, category, logo, website, description } = req.body;
     const sp = sponsors.find(s => s.id === id);
     if (!sp) return res.status(404).json({ success: false, error: "Sponsor not found" });
@@ -1177,7 +1496,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, sponsor: sp });
   });
 
-  app.post("/api/sponsors/delete", (req, res) => {
+  app.post("/api/sponsors/delete", requireAdmin, (req, res) => {
     const { id } = req.body;
     sponsors = sponsors.filter(s => s.id !== id);
     res.json({ success: true, message: "Sponsor deleted" });
@@ -1188,7 +1507,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, alert: liveBroadcastAlert });
   });
 
-  app.post("/api/broadcast-alert", (req, res) => {
+  app.post("/api/broadcast-alert", requireAdmin, (req, res) => {
     const { active, message, type } = req.body;
     liveBroadcastAlert = {
       active: active !== undefined ? active : true,
@@ -1199,7 +1518,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Team Edit by Super Admin
-  app.post("/api/teams/edit", (req, res) => {
+  app.post("/api/teams/edit", requireAdmin, (req, res) => {
     const { id, teamName, preferredTrack, checkedIn, status } = req.body;
     const team = teams.find(t => t.id === id);
     if (!team) return res.status(404).json({ success: false, error: "Team not found" });
@@ -1242,11 +1561,11 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
 
   // Admin Users List
   let adminUsers: AdminUser[] = [
-    { id: "adm-1", email: "superadmin@kssem.edu.in", username: "superadmin", password: "admin123", name: "Dr. K Venkata Rao", role: "SUPER_ADMIN", status: "Active", createdAt: "2026-08-01", twoFactorEnabled: true },
-    { id: "adm-2", email: "regmanager@kssem.edu.in", username: "regmanager", password: "admin123", name: "Prof. Rajesh Kumar", role: "REGISTRATION_MANAGER", status: "Active", createdAt: "2026-08-02", twoFactorEnabled: false },
-    { id: "adm-3", email: "contentmanager@kssem.edu.in", username: "contentmanager", password: "admin123", name: "Prof. Sneha V", role: "CONTENT_MANAGER", status: "Active", createdAt: "2026-08-03", twoFactorEnabled: true },
-    { id: "adm-4", email: "judge1@bosch.com", username: "judge1", password: "admin123", name: "Dr. Ramesh Kumar (Bosch)", role: "JUDGE", status: "Active", createdAt: "2026-08-04", twoFactorEnabled: false },
-    { id: "adm-5", email: "checkin1@kssem.edu.in", username: "checkin1", password: "admin123", name: "Volunteer Gate Staff 1", role: "CHECKIN_STAFF", status: "Active", createdAt: "2026-08-05", twoFactorEnabled: false }
+    { id: "adm-1", email: "superadmin@kssem.edu.in", username: "superadmin", password: hashPassword(DEFAULT_ADMIN_PASSWORD), name: "Dr. K Venkata Rao", role: "SUPER_ADMIN", status: "Active", createdAt: "2026-08-01", twoFactorEnabled: true },
+    { id: "adm-2", email: "regmanager@kssem.edu.in", username: "regmanager", password: hashPassword(DEFAULT_ADMIN_PASSWORD), name: "Prof. Rajesh Kumar", role: "REGISTRATION_MANAGER", status: "Active", createdAt: "2026-08-02", twoFactorEnabled: false },
+    { id: "adm-3", email: "contentmanager@kssem.edu.in", username: "contentmanager", password: hashPassword(DEFAULT_ADMIN_PASSWORD), name: "Prof. Sneha V", role: "CONTENT_MANAGER", status: "Active", createdAt: "2026-08-03", twoFactorEnabled: true },
+    { id: "adm-4", email: "judge1@bosch.com", username: "judge1", password: hashPassword(DEFAULT_ADMIN_PASSWORD), name: "Dr. Ramesh Kumar (Bosch)", role: "JUDGE", status: "Active", createdAt: "2026-08-04", twoFactorEnabled: false },
+    { id: "adm-5", email: "checkin1@kssem.edu.in", username: "checkin1", password: hashPassword(DEFAULT_ADMIN_PASSWORD), name: "Volunteer Gate Staff 1", role: "CHECKIN_STAFF", status: "Active", createdAt: "2026-08-05", twoFactorEnabled: false }
   ];
 
   // Checkpoint (Milestone) definitions — admin can add / edit / delete these.
@@ -1257,16 +1576,27 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   ];
 
   // File persistence — registration records & admin users survive server restarts.
-  const DATA_FILE = path.join(process.cwd(), "server-data.json");
+  const DATA_FILE = path.join(DATA_DIRECTORY, "server-data.json");
 
   let dirtyTimer: NodeJS.Timeout | null = null;
 
   const loadPersisted = () => {
     try {
+      fs.mkdirSync(DATA_DIRECTORY, { recursive: true, mode: 0o700 });
       if (!fs.existsSync(DATA_FILE)) return;
       const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
-      if (Array.isArray(saved.teams)) teams = saved.teams;
-      if (Array.isArray(saved.adminUsers)) adminUsers = saved.adminUsers;
+      if (Array.isArray(saved.teams)) {
+        teams = saved.teams.map((team: any) => ({
+          ...team,
+            accessPassword: normalizeStoredPassword(team.accessPassword),
+        }));
+      }
+      if (Array.isArray(saved.adminUsers)) {
+        adminUsers = saved.adminUsers.map((user: any) => ({
+          ...user,
+            password: normalizeStoredPassword(user.password || DEFAULT_ADMIN_PASSWORD)
+        }));
+      }
       if (Array.isArray(saved.checkpoints)) checkpoints = saved.checkpoints;
       if (typeof saved.nextTeamNumber === "number") nextTeamNumber = saved.nextTeamNumber;
     } catch (e) {
@@ -1280,7 +1610,16 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       // file. This guarantees server-data.json is never left half-written if the
       // process is killed mid-write (which previously corrupted the file and led
       // to the team store being wiped on the next startup).
-      const payload = JSON.stringify({ teams, adminUsers, checkpoints, nextTeamNumber }, null, 2);
+      fs.mkdirSync(DATA_DIRECTORY, { recursive: true, mode: 0o700 });
+      const sanitizedTeams = teams.map((team) => ({
+        ...team,
+        accessPassword: normalizeStoredPassword(team.accessPassword),
+      }));
+      const normalizedAdminUsers = adminUsers.map((user) => ({
+        ...user,
+        password: normalizeStoredPassword(user.password)
+      }));
+      const payload = JSON.stringify({ teams: sanitizedTeams, adminUsers: normalizedAdminUsers, checkpoints, nextTeamNumber }, null, 2);
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, payload, "utf-8");
       fs.renameSync(tmpFile, DATA_FILE);
@@ -1304,8 +1643,17 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     }, 200);
   };
 
-  // Load saved records (if any) and auto-save on a periodic heartbeat.
+  // Load saved records (if any), seed the CSV backup from them if this is the
+  // first run, and then auto-save the JSON store on a periodic heartbeat.
   loadPersisted();
+  try {
+    initialiseParticipantRegistrationBackup();
+  } catch (backupError) {
+    // New registrations still fail safely if their own CSV append cannot be
+    // written. Keep startup alive so an operator can fix disk permissions
+    // without taking the entire site down.
+    console.error("[BACKUP] Could not initialise participant registration CSV:", backupError);
+  }
   setInterval(persistNow, 5000);
 
   // Rulebook Versions
@@ -1356,11 +1704,11 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   ];
 
   // API Audit Logs
-  app.get("/api/audit-logs", (req, res) => {
+  app.get("/api/audit-logs", requireAdmin, (req, res) => {
     res.json({ success: true, logs: auditLogs });
   });
 
-  app.post("/api/audit-logs", (req, res) => {
+  app.post("/api/audit-logs", requireAdmin, (req, res) => {
     const { action, target, beforeValue, afterValue, reason, actorEmail, actorRole } = req.body;
     const newLog: AuditLog = {
       id: `log-${Date.now()}`,
@@ -1379,12 +1727,12 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Admin Users & RBAC API
-  app.get("/api/admin-users", (req, res) => {
-    res.json({ success: true, users: adminUsers });
+  app.get("/api/admin-users", requireAdmin, (req, res) => {
+    res.json({ success: true, users: adminUsers.map((user) => sanitizeAdminUser(user)) });
   });
 
   // Admin Login — validates any provisioned admin user by username or email + password
-  app.post("/api/admin-login", (req, res) => {
+  app.post("/api/admin-login", async (req, res) => {
     const { identifier, password } = req.body;
     const idn = (identifier || '').trim().toLowerCase();
     const pass = (password || '').trim();
@@ -1398,16 +1746,25 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     );
 
     if (!user) {
-      return res.status(401).json({ success: false, error: "User not found." });
+      return res.status(401).json({ success: false, error: "Invalid credentials." });
     }
     if (user.status !== 'Active') {
       return res.status(403).json({ success: false, error: "This account has been suspended." });
     }
-    if (pass !== (user.password || 'admin123')) {
-      return res.status(401).json({ success: false, error: "Invalid password." });
+    if (!verifyPassword(pass, user.password)) {
+      return res.status(401).json({ success: false, error: "Invalid credentials." });
     }
 
     user.lastLogin = new Date().toISOString();
+    const sid = createSession({
+      id: user.id,
+      type: 'admin',
+      role: user.role,
+      email: user.email,
+      username: user.username,
+      name: user.name,
+    });
+    setAuthCookie(res, sid);
     res.json({
       success: true,
       user: {
@@ -1422,14 +1779,27 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     });
   });
 
-  app.post("/api/admin-users", (req, res) => {
+  app.post("/api/admin/logout", (req, res) => {
+    clearAuthCookie(res);
+    const session = getSessionFromRequest(req);
+    if (session) {
+      const cookieRaw = req.headers.cookie || "";
+      const match = cookieRaw.split(";").map((v: string) => v.trim()).find((v: string) => v.startsWith(`${AUTH_COOKIE}=`));
+      const sid = match ? decodeURIComponent(match.slice(AUTH_COOKIE.length + 1)) : null;
+      if (sid) sessionStore.delete(sid);
+    }
+    res.json({ success: true, message: "Logged out." });
+  });
+
+  app.post("/api/admin-users", requireSuperAdmin, (req, res) => {
     const { email, name, role, twoFactorEnabled, username, password } = req.body;
+    const passwordValue = String(password || "").trim();
     const newUser: AdminUser = {
       id: `adm-${Date.now()}`,
       email,
       name,
       username: username || email,
-      password: password || "admin123",
+      password: normalizeStoredPassword(passwordValue) || hashPassword(DEFAULT_ADMIN_PASSWORD),
       role: role || "ADMIN",
       status: "Active",
       createdAt: new Date().toISOString().split("T")[0],
@@ -1451,10 +1821,10 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       ipAddress: req.ip || "127.0.0.1"
     });
 
-    res.json({ success: true, user: newUser });
+    res.json({ success: true, user: sanitizeAdminUser(newUser) });
   });
 
-  app.post("/api/admin-users/status", (req, res) => {
+  app.post("/api/admin-users/status", requireSuperAdmin, (req, res) => {
     const { id, status } = req.body;
     const usr = adminUsers.find(u => u.id === id);
     if (usr) {
@@ -1471,11 +1841,11 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         ipAddress: req.ip || "127.0.0.1"
       });
     }
-    res.json({ success: true, user: usr });
+    res.json({ success: true, user: sanitizeAdminUser(usr) });
   });
 
   // Update an admin user (name / username / password / assigned role) — full UPDATE (edit)
-  app.put("/api/admin-users/:id", (req, res) => {
+  app.put("/api/admin-users/:id", requireSuperAdmin, (req, res) => {
     const { id } = req.params;
     const { name, email, username, password, role, twoFactorEnabled } = req.body;
     const usr = adminUsers.find(u => u.id === id);
@@ -1486,7 +1856,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     if (name !== undefined) usr.name = name;
     if (email !== undefined) usr.email = email;
     if (username !== undefined) usr.username = username;
-    if (password) usr.password = password;
+    if (password !== undefined && String(password).trim() !== "") usr.password = normalizeStoredPassword(String(password).trim()) || usr.password;
     if (role !== undefined) usr.role = role;
     if (twoFactorEnabled !== undefined) usr.twoFactorEnabled = !!twoFactorEnabled;
 
@@ -1507,7 +1877,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Delete an admin user — full DELETE (remove)
-  app.delete("/api/admin-users/:id", (req, res) => {
+  app.delete("/api/admin-users/:id", requireSuperAdmin, (req, res) => {
     const { id } = req.params;
     const idx = adminUsers.findIndex(u => u.id === id);
     if (idx === -1) {
@@ -1528,11 +1898,11 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       ipAddress: req.ip || "127.0.0.1"
     });
 
-    res.json({ success: true, deleted: removed });
+    res.json({ success: true, deleted: sanitizeAdminUser(removed) });
   });
 
   // Score Override with mandatory reason
-  app.post("/api/submissions/override-score", (req, res) => {
+  app.post("/api/submissions/override-score", requireSuperAdmin, (req, res) => {
     const { submissionId, newTotalScore, reason, actorEmail } = req.body;
     if (!reason || reason.trim().length < 5) {
       return res.status(400).json({ success: false, error: "Mandatory audit reason is required for score override." });
@@ -1588,7 +1958,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, rulebooks });
   });
 
-  app.post("/api/rulebooks", (req, res) => {
+  app.post("/api/rulebooks", requireAdmin, (req, res) => {
     const { title, version, notes } = req.body;
     rulebooks.forEach(r => r.active = false);
     const newRb: RulebookVersion = {
@@ -1623,7 +1993,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, campaigns: emailCampaigns });
   });
 
-  app.post("/api/email-campaigns", async (req, res) => {
+  app.post("/api/email-campaigns", requireAdmin, async (req, res) => {
     const { title, targetGroup, subject, body } = req.body;
     const subjectSafe = String(subject || "").trim();
     const bodySafe = String(body || "").trim();
@@ -1788,7 +2158,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, rooms: roomAllocations });
   });
 
-  app.post("/api/room-allocations/add", (req, res) => {
+  app.post("/api/room-allocations/add", requireAdmin, (req, res) => {
     const { blockName, roomNumber, gender, capacity } = req.body;
     if (!blockName || !roomNumber) return res.status(400).json({ success: false, error: "Block name and room number required" });
 
@@ -1805,7 +2175,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, room: newRoom });
   });
 
-  app.post("/api/room-allocations/assign", (req, res) => {
+  app.post("/api/room-allocations/assign", requireAdmin, (req, res) => {
     const { roomId, teamId } = req.body;
     const room = roomAllocations.find(r => r.id === roomId);
     if (!room) return res.status(404).json({ success: false, error: "Room not found" });
@@ -1819,7 +2189,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, room });
   });
 
-  app.post("/api/room-allocations/delete", (req, res) => {
+  app.post("/api/room-allocations/delete", requireAdmin, (req, res) => {
     const { id } = req.body;
     roomAllocations = roomAllocations.filter(r => r.id !== id);
     res.json({ success: true, message: "Room allocation removed" });
@@ -1843,7 +2213,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, schedule: scheduleItems });
   });
 
-  app.post("/api/schedule/add", (req, res) => {
+  app.post("/api/schedule/add", requireAdmin, (req, res) => {
     const { time, title, description, type, day, location } = req.body;
     if (!time || !title) return res.status(400).json({ success: false, error: "Time and title are required" });
 
@@ -1860,7 +2230,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, item: newItem });
   });
 
-  app.post("/api/schedule/edit", (req, res) => {
+  app.post("/api/schedule/edit", requireAdmin, (req, res) => {
     const { id, time, title, description, type, day, location } = req.body;
     const item = scheduleItems.find(s => s.id === id);
     if (!item) return res.status(404).json({ success: false, error: "Schedule item not found" });
@@ -1875,7 +2245,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, item });
   });
 
-  app.post("/api/schedule/delete", (req, res) => {
+  app.post("/api/schedule/delete", requireAdmin, (req, res) => {
     const { id } = req.body;
     scheduleItems = scheduleItems.filter(s => s.id !== id);
     res.json({ success: true, message: "Schedule item deleted" });
@@ -1892,7 +2262,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, policies });
   });
 
-  app.post("/api/policies/add", (req, res) => {
+  app.post("/api/policies/add", requireAdmin, (req, res) => {
     const { title, category, text } = req.body;
     if (!title || !text) return res.status(400).json({ success: false, error: "Title and text required" });
 
@@ -1901,14 +2271,14 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, policy: newPol });
   });
 
-  app.post("/api/policies/delete", (req, res) => {
+  app.post("/api/policies/delete", requireAdmin, (req, res) => {
     const { id } = req.body;
     policies = policies.filter(p => p.id !== id);
     res.json({ success: true, message: "Policy removed" });
   });
 
   // Payment UTR Verification API
-  app.post("/api/finance/verify-utr", (req, res) => {
+  app.post("/api/finance/verify-utr", requireAdmin, (req, res) => {
     const { teamId, paymentStatus } = req.body; // 'Verified' or 'Rejected'
     const team = teams.find(t => t.id === teamId);
     if (!team) return res.status(404).json({ success: false, error: "Team not found" });
@@ -1936,7 +2306,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Emergency Freeze Control
-  app.post("/api/emergency-control", (req, res) => {
+  app.post("/api/emergency-control", requireSuperAdmin, (req, res) => {
     const { actionType, freezeState, reason } = req.body;
     if (!reason || reason.trim().length < 5) {
       return res.status(400).json({ success: false, error: "Mandatory emergency reason is required." });
@@ -1967,7 +2337,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, tickets });
   });
 
-  app.post("/api/tickets", (req, res) => {
+  app.post("/api/tickets", requireTeamAccess, (req, res) => {
     const { teamId, teamName, subject, message, category } = req.body;
     const newTicket: SupportTicket = {
       id: `t-${Date.now()}`,
@@ -1983,7 +2353,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, ticket: newTicket });
   });
 
-  app.post("/api/tickets/resolve", (req, res) => {
+  app.post("/api/tickets/resolve", requireAdmin, (req, res) => {
     const { ticketId, response } = req.body;
     const ticket = tickets.find(t => t.id === ticketId);
     if (ticket) {
@@ -1998,7 +2368,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, reports: milestoneReports });
   });
 
-  app.post("/api/milestone-reports", (req, res) => {
+  app.post("/api/milestone-reports", requireTeamAccess, (req, res) => {
     const { teamId, checkpointNumber, checkpointName, summary, repoBranchOrLink, blockers } = req.body;
     if (!teamId || !checkpointNumber) {
       return res.status(400).json({ success: false, error: "Team ID and Checkpoint number required" });
@@ -2027,7 +2397,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, report: newReport });
   });
 
-  app.post("/api/milestone-reports/review", (req, res) => {
+  app.post("/api/milestone-reports/review", requireAdmin, (req, res) => {
     const { reportId, status, feedback } = req.body;
     const report = milestoneReports.find(r => r.id === reportId);
     if (!report) return res.status(404).json({ success: false, error: "Report not found" });
@@ -2043,7 +2413,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, checkpoints });
   });
 
-  app.post("/api/checkpoints", (req, res) => {
+  app.post("/api/checkpoints", requireAdmin, (req, res) => {
     const { title, description, time, status } = req.body;
     if (!title || !String(title).trim()) {
       return res.status(400).json({ success: false, error: "Checkpoint title is required" });
@@ -2074,7 +2444,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, checkpoint: newCp, checkpoints });
   });
 
-  app.put("/api/checkpoints/:id", (req, res) => {
+  app.put("/api/checkpoints/:id", requireAdmin, (req, res) => {
     const { id } = req.params;
     const cp = checkpoints.find(c => c.id === id);
     if (!cp) return res.status(404).json({ success: false, error: "Checkpoint not found" });
@@ -2098,7 +2468,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, checkpoint: cp, checkpoints });
   });
 
-  app.delete("/api/checkpoints/:id", (req, res) => {
+  app.delete("/api/checkpoints/:id", requireAdmin, (req, res) => {
     const { id } = req.params;
     const idx = checkpoints.findIndex(c => c.id === id);
     if (idx === -1) return res.status(404).json({ success: false, error: "Checkpoint not found" });
@@ -2126,7 +2496,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     res.json({ success: true, bookings: mentorBookings });
   });
 
-  app.post("/api/mentor-bookings", (req, res) => {
+  app.post("/api/mentor-bookings", requireTeamAccess, (req, res) => {
     const { teamId, teamName, mentorId, mentorName, slot, topic } = req.body;
     const newBooking: MentorBooking = {
       id: `mb-${Date.now()}`,
@@ -2143,11 +2513,11 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Developer & Website Super Admin Live CMS Config
-  app.get("/api/cms-config", (req, res) => {
+  app.get("/api/cms-config", requireAdmin, (req, res) => {
     res.json({ success: true, config: cmsConfig });
   });
 
-  app.post("/api/cms-config", (req, res) => {
+  app.post("/api/cms-config", requireAdmin, (req, res) => {
     const updated = req.body;
     cmsConfig = { ...cmsConfig, ...updated };
     res.json({ success: true, config: cmsConfig, message: "Website CMS Configuration updated live across all sections!" });
@@ -2160,7 +2530,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
 
   // Admin action: issue/release certificates to all verified participants.
   // Participants cannot download certificates until this is set to true.
-  app.post("/api/certificate-issue", (req, res) => {
+  app.post("/api/certificate-issue", requireAdmin, (req, res) => {
     cmsConfig.enableCertificateDownloads = true;
     res.json({ success: true, enabled: true, config: cmsConfig, message: "Certificates released to all verified participants!" });
   });
@@ -2226,6 +2596,9 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  return server;
 }
 
-run();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  run();
+}
