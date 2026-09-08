@@ -1,6 +1,0 @@
-# Replace anvation.example.com with the real domain before enabling Caddy.
-# DNS for that domain must point to this VM's public IP address.
-anvation.example.com {
-	encode zstd gzip
-	reverse_proxy 127.0.0.1:3001
-}
