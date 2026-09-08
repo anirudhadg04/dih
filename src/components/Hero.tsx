@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Rocket, FileText, Sparkles, Trophy, Users, Building, Flame, ChevronDown, CheckCircle2, Calendar, MapPin, Award, Layers, Lightbulb, UserCheck, BrainCircuit, ExternalLink, Cpu, Shield, Activity, Sprout, BarChart3, Radio, Terminal, Code2, Zap, Check } from 'lucide-react';
+import { Sparkles, Trophy, Users, Building, Flame, ChevronDown, CheckCircle2, Calendar, MapPin, Award, Lightbulb, UserCheck, BrainCircuit, ExternalLink, Cpu, Shield, Activity, Sprout, BarChart3, Radio, Terminal, Code2, Zap, Check } from 'lucide-react';
 import { COLLEGE_INFO } from '../data/mockData';
 import campusBgImage from '../assets/images/kssem_campus_real_1788194089427.jpg';
-import anvationLogo from '../assets/branding/anvation-navbar-logo.png';
 
 
 interface HeroProps {
@@ -16,7 +15,7 @@ interface HeroProps {
   };
 }
 
-export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenRulebook, liveStats }) => {
+export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Live CMS State
@@ -172,17 +171,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenRulebook, live
       <div className="relative z-10 w-full max-w-7xl mx-auto space-y-8 pt-2">
         
         {/* Top Badge Pill */}
-        <div className="flex justify-center">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-950/90 border border-cyan-400/40 backdrop-blur-md shadow-[0_0_25px_rgba(34,211,238,0.25)] card-gradient-border">
-            <Sparkles className="w-4 h-4 text-cyan-300 animate-spin" />
-            <span className="text-xs font-black text-cyan-200 tracking-wider uppercase">
-              NATIONAL LEVEL 24-HOUR HACKATHON
-            </span>
-            <span className="bg-gradient-to-r from-cyan-500 via-sky-500 to-fuchsia-500 text-slate-950 text-[10px] uppercase font-black px-2.5 py-0.5 rounded-full shadow">
-              OCTOBER 8–9, 2026
-            </span>
-          </div>
-        </div>
+      
 
         {/* Content & 3D Interactive Hub Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
@@ -199,7 +188,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenRulebook, live
             </div>
 
             {/* Event Title Banner - Lighter, Radiant Holographic Aesthetic */}
-            <div className="space-y-4 relative p-6 sm:p-8 rounded-3xl bg-gradient-to-b from-slate-900/90 via-slate-950/85 to-slate-950/90 backdrop-blur-2xl overflow-hidden group transition-all duration-500 card-gradient-border force-dark">
+            <div className="space-y-4 relative p-6 sm:p-8 lg:h-[450px] rounded-3xl bg-gradient-to-b from-slate-900/90 via-slate-950/85 to-slate-950/90 backdrop-blur-2xl overflow-hidden group transition-all duration-500 card-gradient-border force-dark">
               {/* Corner Cyber Accents */}
               <div className="absolute top-2 left-2 w-5 h-5 border-t-2 border-l-2 border-cyan-300 pointer-events-none" />
               <div className="absolute top-2 right-2 w-5 h-5 border-t-2 border-r-2 border-emerald-300 pointer-events-none" />
@@ -243,114 +232,25 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenRulebook, live
                   <span>Team: <span className="text-white font-black">2-4 Members</span></span>
                 </div>
 
-                <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-950/90 to-teal-950/70 border border-emerald-400/50 text-emerald-200 font-extrabold text-xs shadow-[0_0_18px_rgba(52,211,153,0.22)]">
-                  <Flame className="w-4 h-4 text-emerald-300" />
-                  <span>Prize Pool: <span className="text-emerald-300 font-black">₹50,000</span></span>
-                </div>
+              
 
-                <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-sky-950/90 to-indigo-950/70 border border-sky-400/50 text-sky-200 font-extrabold text-xs shadow-[0_0_18px_rgba(56,189,248,0.22)]">
-                  <Calendar className="w-4 h-4 text-sky-300" />
-                  <span>Dates: <span className="text-white font-black">Oct 8–9, 2026</span></span>
-                </div>
+               
               </div>
             </div>
 
-            {/* Glowing Neon Countdown Box */}
-            <div className="p-4 rounded-2xl bg-slate-950/90 backdrop-blur-xl border border-cyan-400/40 shadow-[0_0_30px_rgba(6,182,212,0.2)]">
-              <div className="text-xs font-extrabold text-cyan-300 uppercase tracking-widest mb-2.5 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                  <span className="font-['Orbitron',sans-serif]">HACKATHON LAUNCH COUNTDOWN</span>
-                </div>
-                <span className="font-mono text-[10px] text-emerald-400">OCT 8, 2026 • 09:30 AM IST</span>
-              </div>
-              <div className="grid grid-cols-4 gap-2 text-center">
-                <div className="relative overflow-hidden p-2 sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-cyan-950/60 border border-cyan-500/40 shadow-[inset_0_0_18px_rgba(34,211,238,0.14)]">
-                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-300 to-sky-400" />
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.22),transparent_70%)] pointer-events-none" />
-                  <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-cyan-200 to-cyan-400">{String(timeLeft.days).padStart(2, '0')}</div>
-                  <div className="text-[10px] text-cyan-300/80 font-bold uppercase tracking-wider mt-0.5">DAYS</div>
-                </div>
-
-                <div className="relative overflow-hidden p-2 sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-sky-950/60 border border-sky-500/40 shadow-[inset_0_0_18px_rgba(56,189,248,0.14)]">
-                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-sky-300 to-indigo-400" />
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(56,189,248,0.22),transparent_70%)] pointer-events-none" />
-                  <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-sky-200 to-sky-400">{String(timeLeft.hours).padStart(2, '0')}</div>
-                  <div className="text-[10px] text-sky-300/80 font-bold uppercase tracking-wider mt-0.5">HOURS</div>
-                </div>
-
-                <div className="relative overflow-hidden p-2 sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-emerald-950/60 border border-emerald-500/40 shadow-[inset_0_0_18px_rgba(52,211,153,0.14)]">
-                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-300 to-teal-400" />
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(52,211,153,0.22),transparent_70%)] pointer-events-none" />
-                  <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-emerald-200 to-emerald-400">{String(timeLeft.minutes).padStart(2, '0')}</div>
-                  <div className="text-[10px] text-emerald-300/80 font-bold uppercase tracking-wider mt-0.5">MINUTES</div>
-                </div>
-
-                <div className="relative overflow-hidden p-2 sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-rose-950/60 border border-amber-500/40 shadow-[inset_0_0_18px_rgba(251,191,36,0.14)] animate-pulse">
-                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-300 to-rose-400" />
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(251,191,36,0.22),transparent_70%)] pointer-events-none" />
-                  <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-amber-200 to-rose-400">{String(timeLeft.seconds).padStart(2, '0')}</div>
-                  <div className="text-[10px] text-amber-300/80 font-bold uppercase tracking-wider mt-0.5">SECONDS</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Action CTAs */}
-            <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3 pt-1">
-              <button
-                onClick={onOpenRegister}
-                className="relative group w-full sm:w-auto px-8 py-3.5 rounded-xl font-black text-sm text-slate-950 bg-[length:220%_100%] animate-gradient-flow bg-gradient-to-r from-cyan-300 via-sky-300 via-fuchsia-300 to-emerald-300 shadow-[0_0_35px_rgba(34,211,238,0.75)] hover:shadow-[0_0_50px_rgba(217,70,239,0.9)] btn-tactile flex items-center justify-center gap-2 border border-white overflow-hidden"
-                id="hero-register-btn"
-              >
-                <span className="absolute inset-0 bg-[linear-gradient(115deg,transparent_30%,rgba(255,255,255,0.5)_48%,rgba(255,255,255,0.5)_52%,transparent_70%)] bg-[size:200%_100%] animate-laser-sweep pointer-events-none" />
-                <Rocket className="w-4 h-4 text-slate-950 animate-bounce relative z-10" />
-                <span className="uppercase tracking-wider font-['Orbitron',sans-serif] relative z-10">REGISTER TEAM NOW</span>
-              </button>
-
-              <button
-                onClick={onOpenRulebook}
-                className="w-full sm:w-auto px-5 py-3.5 rounded-xl font-bold text-xs text-slate-200 bg-slate-900/90 border border-slate-700 hover:border-cyan-500/50 hover:bg-slate-800 btn-tactile flex items-center justify-center gap-2"
-                id="hero-rulebook-btn"
-              >
-                <FileText className="w-4 h-4 text-cyan-400" />
-                <span>Rulebook & Guidelines</span>
-              </button>
-
-              <button
-                onClick={() => scrollToSection('tracks')}
-                className="w-full sm:w-auto px-5 py-3.5 rounded-xl font-bold text-xs text-slate-200 bg-slate-900/90 border border-slate-700 hover:border-emerald-500/50 hover:bg-slate-800 btn-tactile flex items-center justify-center gap-2"
-                id="hero-tracks-btn"
-              >
-                <Layers className="w-4 h-4 text-emerald-400" />
-                <span>8 Domains</span>
-              </button>
-            </div>
           </div>
 
           {/* Right Column: Key Event Highlights & Live Operational Badges (5 cols) */}
-          <div className="lg:col-span-5 space-y-4">
+          <div className="lg:col-span-5 space-y-4 lg:mt-16">
 
-            {/* Brand artwork from the supplied Anvation reference */}
-            <div className="relative overflow-hidden rounded-3xl bg-[#050916]/90 p-3 shadow-[0_0_45px_rgba(34,211,238,0.22)] card-gradient-border animate-float-y force-dark">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(34,211,238,0.16),transparent_62%)] pointer-events-none" />
-              <div className="absolute inset-0 bg-[conic-gradient(from_0deg,transparent,rgba(168,85,247,0.18),transparent,rgba(52,211,153,0.14),transparent)] animate-spin-slow pointer-events-none mix-blend-screen" />
-              <img
-                src={anvationLogo}
-                alt="Anvation — Explore, Innovate, Transform"
-                className="relative w-full rounded-2xl object-cover mix-blend-screen"
-              />
-            </div>
-            
             {/* Quick Hackathon Key Highlights Card */}
-            <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-b from-slate-950/95 to-slate-950/90 backdrop-blur-xl border border-cyan-500/40 shadow-[0_0_40px_rgba(6,182,212,0.2)] space-y-4 card-gradient-border force-dark">
+            <div className="p-5 sm:p-6 lg:h-[450px] rounded-3xl bg-gradient-to-b from-slate-950/95 to-slate-950/90 backdrop-blur-xl border border-cyan-500/40 shadow-[0_0_40px_rgba(6,182,212,0.2)] space-y-4 card-gradient-border force-dark">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
-                  <span className="font-mono text-xs font-black text-white tracking-wider uppercase">EVENT KEY FACTS</span>
+                  <span className="font-mono text-[14px] font-black text-white tracking-wider uppercase">EVENT DETAILS</span>
                 </div>
-                <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/40 font-bold">
-                  OCTOBER 2026
-                </span>
+      
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -359,8 +259,8 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenRulebook, live
                     <Calendar className="w-4 h-4" />
                   </div>
                   <div>
-                    <div className="text-xs font-black text-white">OCT 8–9, 2026</div>
-                    <div className="text-[10px] text-cyan-200/80 font-semibold">24-Hour Non-stop</div>
+                    <div className="text-[14px] font-black text-white">OCT 8–9, 2026</div>
+                    <div className="text-[12px] text-cyan-200/80 font-semibold">24-Hour Non-stop</div>
                   </div>
                 </div>
 
@@ -369,8 +269,8 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenRulebook, live
                     <Trophy className="w-4 h-4" />
                   </div>
                   <div>
-                    <div className="text-xs font-black text-white">₹50,000</div>
-                    <div className="text-[10px] text-emerald-200/80 font-semibold">Total Prize Pool</div>
+                    <div className="text-[14px] font-black text-white">₹50,000</div>
+                    <div className="text-[12px] text-emerald-200/80 font-semibold">Total Prize Pool</div>
                   </div>
                 </div>
 
@@ -379,8 +279,8 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenRulebook, live
                     <MapPin className="w-4 h-4" />
                   </div>
                   <div>
-                    <div className="text-xs font-black text-white">KSSEM Bengaluru</div>
-                    <div className="text-[10px] text-sky-200/80 font-semibold">Campus Tech Labs</div>
+                    <div className="text-[14px] font-black text-white">KSSEM Bengaluru</div>
+                    <div className="text-[12px] text-sky-200/80 font-semibold">Campus Tech Labs</div>
                   </div>
                 </div>
 
@@ -389,15 +289,15 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenRulebook, live
                     <Award className="w-4 h-4" />
                   </div>
                   <div>
-                    <div className="text-xs font-black text-white">Free Food & Stay</div>
-                    <div className="text-[10px] text-slate-400 font-semibold">4 Meals Included</div>
+                    <div className="text-[14px] font-black text-white">Free Food & Stay</div>
+                    <div className="text-[12px] text-slate-400 font-semibold">4 Meals Included</div>
                   </div>
                 </div>
               </div>
 
               {/* Event Benefits Checklist */}
               <div className="pt-2 border-t border-slate-800 space-y-2">
-                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                <div className="text-[12px] font-bold text-slate-400 uppercase tracking-wider font-mono">
                   PARTICIPANT ADVANTAGES
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
@@ -425,76 +325,40 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenRulebook, live
 
         </div>
 
-        {/* DOMAINS SECTION ON HERO - The 8 Key Domains */}
-        <div id="domains-preview" className="p-5 rounded-3xl bg-slate-950/90 backdrop-blur-xl border border-cyan-500/30 shadow-2xl space-y-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-slate-800 pb-3">
+        {/* Full-width countdown below the title and event facts panels */}
+        <div className="p-4 h-[180px] rounded-2xl bg-slate-950/90 backdrop-blur-xl border border-cyan-400/40 shadow-[0_0_30px_rgba(6,182,212,0.2)]">
+          <div className="text-xs font-extrabold text-cyan-300 uppercase tracking-widest mb-2.5 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 font-bold text-xs uppercase font-mono">08 DOMAINS</div>
-              <h3 className="text-lg font-black text-white tracking-wide font-['Orbitron',sans-serif]">
-                ANVATION HACKATHON TRACKS
-              </h3>
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="font-['Orbitron',sans-serif]">HACKATHON LAUNCH COUNTDOWN</span>
             </div>
-            <span className="text-xs text-slate-400 font-semibold">Organised by CSE in association with AI&DS, CS&BS</span>
+            <span className="font-mono text-[10px] text-emerald-400">OCT 8, 2026 • 09:30 AM IST</span>
           </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-            <div className="p-3 rounded-2xl bg-slate-900/80 border border-cyan-500/30 hover:border-cyan-400 transition-all text-center space-y-2 group">
-              <div className="w-9 h-9 mx-auto rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Cpu className="w-4 h-4" />
-              </div>
-              <div className="text-[11px] font-bold text-white leading-tight">AI & Machine Learning</div>
+          <div className="grid grid-cols-4 gap-2 text-center">
+            <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-cyan-950/60 border border-cyan-500/40 shadow-[inset_0_0_18px_rgba(34,211,238,0.14)]">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-300 to-sky-400" />
+              <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-cyan-200 to-cyan-400 ">{String(timeLeft.days).padStart(2, '0')}</div>
+              <div className="text-[10px] text-cyan-300/80 font-bold uppercase tracking-wider mt-0.5">DAYS</div>
             </div>
-
-            <div className="p-3 rounded-2xl bg-slate-900/80 border border-rose-500/30 hover:border-rose-400 transition-all text-center space-y-2 group">
-              <div className="w-9 h-9 mx-auto rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Activity className="w-4 h-4" />
-              </div>
-              <div className="text-[11px] font-bold text-white leading-tight">Healthcare & HealthTech</div>
+            <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-sky-950/60 border border-sky-500/40 shadow-[inset_0_0_18px_rgba(56,189,248,0.14)]">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-sky-300 to-indigo-400" />
+              <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-sky-200 to-sky-400">{String(timeLeft.hours).padStart(2, '0')}</div>
+              <div className="text-[10px] text-sky-300/80 font-bold uppercase tracking-wider mt-0.5">HOURS</div>
             </div>
-
-            <div className="p-3 rounded-2xl bg-slate-900/80 border border-indigo-500/30 hover:border-indigo-400 transition-all text-center space-y-2 group">
-              <div className="w-9 h-9 mx-auto rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Award className="w-4 h-4" />
-              </div>
-              <div className="text-[11px] font-bold text-white leading-tight">Education & EdTech</div>
+            <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-emerald-950/60 border border-emerald-500/40 shadow-[inset_0_0_18px_rgba(52,211,153,0.14)]">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-300 to-teal-400" />
+              <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-emerald-200 to-emerald-400">{String(timeLeft.minutes).padStart(2, '0')}</div>
+              <div className="text-[10px] text-emerald-300/80 font-bold uppercase tracking-wider mt-0.5">MINUTES</div>
             </div>
-
-            <div className="p-3 rounded-2xl bg-slate-900/80 border border-emerald-500/30 hover:border-emerald-400 transition-all text-center space-y-2 group">
-              <div className="w-9 h-9 mx-auto rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Sprout className="w-4 h-4" />
-              </div>
-              <div className="text-[11px] font-bold text-white leading-tight">Agriculture & AgriTech</div>
-            </div>
-
-            <div className="p-3 rounded-2xl bg-slate-900/80 border border-amber-500/30 hover:border-amber-400 transition-all text-center space-y-2 group">
-              <div className="w-9 h-9 mx-auto rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <BarChart3 className="w-4 h-4" />
-              </div>
-              <div className="text-[11px] font-bold text-white leading-tight">FinTech & Digital Finance</div>
-            </div>
-
-            <div className="p-3 rounded-2xl bg-slate-900/80 border border-red-500/30 hover:border-red-400 transition-all text-center space-y-2 group">
-              <div className="w-9 h-9 mx-auto rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Shield className="w-4 h-4" />
-              </div>
-              <div className="text-[11px] font-bold text-white leading-tight">Cybersecurity & Privacy</div>
-            </div>
-
-            <div className="p-3 rounded-2xl bg-slate-900/80 border border-sky-500/30 hover:border-sky-400 transition-all text-center space-y-2 group">
-              <div className="w-9 h-9 mx-auto rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Building className="w-4 h-4" />
-              </div>
-              <div className="text-[11px] font-bold text-white leading-tight">Smart Cities & CivicTech</div>
-            </div>
-
-            <div className="p-3 rounded-2xl bg-slate-900/80 border border-teal-500/30 hover:border-teal-400 transition-all text-center space-y-2 group">
-              <div className="w-9 h-9 mx-auto rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Radio className="w-4 h-4" />
-              </div>
-              <div className="text-[11px] font-bold text-white leading-tight">Sustainability & ClimateTech</div>
+            <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-rose-950/60 border border-amber-500/40 shadow-[inset_0_0_18px_rgba(251,191,36,0.14)] animate-pulse">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-300 to-rose-400" />
+              <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-amber-200 to-rose-400">{String(timeLeft.seconds).padStart(2, '0')}</div>
+              <div className="text-[10px] text-amber-300/80 font-bold uppercase tracking-wider mt-0.5">SECONDS</div>
             </div>
           </div>
         </div>
+
+        
 
         {/* Bottom 4 Feature Cards Bar */}
         <div className="p-4 rounded-2xl bg-slate-950/70 backdrop-blur-md border border-slate-800">

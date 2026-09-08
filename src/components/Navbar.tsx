@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import anvationNavbarLogo from '../assets/branding/anvation-navbar-logo.png';
 import { PortalView } from '../types';
 import { useTheme } from '../theme';
-import { User, ShieldCheck, FileText, Menu, X, Rocket, Sparkles, Clock, Globe, Sun, Moon } from 'lucide-react';
+import { User, ShieldCheck, FileText, Menu, X, Rocket, Sparkles, Clock, Globe } from 'lucide-react';
 
 interface NavbarProps {
   currentView: PortalView;
@@ -19,7 +19,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const { theme, toggleTheme } = useTheme();
+  const { theme } = useTheme();
   const isLight = theme === 'light';
   const [timeLeft, setTimeLeft] = useState({ hours: 23, minutes: 59, seconds: 45 });
 
@@ -64,11 +64,11 @@ export const Navbar: React.FC<NavbarProps> = ({
         ? 'bg-[var(--surface-nav-solid)] backdrop-blur-md border-b border-pink-500/20 shadow-[0_4px_25px_rgba(219,39,119,0.2)]' 
         : 'bg-[var(--surface-nav)] backdrop-blur-sm border-b border-slate-800'
     }`}>
-      <div className="max-w-[1440px] w-full mx-auto px-2 sm:px-4 lg:px-5 h-20 flex items-center justify-between gap-5">
-        {/* Anvation brand logo — positioned at the far-left of the primary nav */}
+      <div className="relative max-w-[1440px] w-full mx-auto px-2 sm:px-4 lg:px-5 h-16 flex items-center justify-between gap-5">
+        {/* Centered Anvation brand logo */}
         <button 
           onClick={() => setCurrentView('landing')}
-          className="text-left shrink-0 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 rounded-lg -ml-1.5 p-0 transition-transform active:scale-95"
+          className="text-left shrink-0 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 rounded-lg p-0 transition-transform active:scale-95"
           id="nav-brand-logo-btn"
           aria-label="Go to Anvation event home"
         >
@@ -79,64 +79,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           />
         </button>
 
-        {/* Desktop Navigation Links */}
-        <nav className="hidden lg:flex items-center gap-6 text-sm font-medium text-slate-300">
-          <button 
-            onClick={() => scrollToSection('about')} 
-            className="hover:text-pink-400 transition-colors py-1"
-            id="nav-about-btn"
-          >
-            About Anvation
-          </button>
-
-          <button 
-            onClick={() => scrollToSection('tracks')} 
-            className="hover:text-pink-400 transition-colors py-1"
-            id="nav-tracks-btn"
-          >
-            8 Domains
-          </button>
-
-          <button 
-            onClick={() => scrollToSection('prizes')} 
-            className="hover:text-pink-400 transition-colors py-1"
-            id="nav-prizes-btn"
-          >
-            Prizes
-          </button>
-
-          <button 
-            onClick={() => scrollToSection('timeline')} 
-            className="hover:text-pink-400 transition-colors py-1"
-            id="nav-schedule-btn"
-          >
-            Schedule
-          </button>
-
-          <button 
-            onClick={onOpenRulebook} 
-            className="flex items-center gap-1.5 text-orange-300 hover:text-orange-200 bg-orange-500/10 px-3 py-1.5 rounded-full border border-orange-500/30 transition-all hover:bg-orange-500/20"
-            id="nav-rulebook-btn"
-          >
-            <FileText className="w-4 h-4 text-orange-400" />
-            <span>Rulebook</span>
-          </button>
-        </nav>
-
         {/* Right Portal Switcher & Action CTAs */}
         <div className="hidden md:flex items-center gap-3">
-          {/* Theme Toggle */}
-          <button
-            onClick={toggleTheme}
-            aria-label={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
-            title={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
-            id="theme-toggle-btn"
-            className="relative w-10 h-10 rounded-xl border border-slate-700/70 bg-slate-900/70 flex items-center justify-center overflow-hidden transition-all hover:border-cyan-400/60 hover:shadow-[0_0_16px_rgba(34,211,238,0.35)] btn-tactile"
-          >
-            <Sun className={`w-[18px] h-[18px] text-amber-400 transition-all duration-300 ${isLight ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-50'}`} />
-            <Moon className={`w-[18px] h-[18px] text-cyan-400 absolute transition-all duration-300 ${isLight ? 'opacity-0 rotate-90 scale-50' : 'opacity-100 rotate-0 scale-100'}`} />
-          </button>
-
           {/* Portal Switcher Buttons */}
           <div className="bg-slate-900/90 p-1 rounded-xl border border-slate-700/80 flex items-center gap-1 text-xs">
             <button
@@ -212,6 +156,50 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
+      {/* Desktop Navigation Sub-bar */}
+      <nav className="hidden lg:flex items-center justify-center gap-8 min-h-12 px-4 border-t border-slate-800/80 text-sm font-medium text-slate-300">
+        <button 
+          onClick={() => scrollToSection('about')} 
+          className="hover:text-pink-400 transition-colors py-2"
+          id="nav-about-btn"
+        >
+          About
+        </button>
+
+        <button 
+          onClick={() => scrollToSection('tracks')} 
+          className="hover:text-pink-400 transition-colors py-2"
+          id="nav-tracks-btn"
+        >
+          Domains
+        </button>
+
+        <button
+          onClick={() => scrollToSection('prizes')} 
+          className="hover:text-pink-400 transition-colors py-2"
+          id="nav-prizes-btn"
+        >
+          Prizes
+        </button>
+
+        <button 
+          onClick={() => scrollToSection('timeline')} 
+          className="hover:text-pink-400 transition-colors py-2"
+          id="nav-schedule-btn"
+        >
+          Schedule
+        </button>
+
+        <button 
+          onClick={onOpenRulebook} 
+          className="flex items-center gap-1.5 text-orange-300 hover:text-orange-200 bg-orange-500/10 px-3 py-1.5 rounded-full border border-orange-500/30 transition-all hover:bg-orange-500/20"
+          id="nav-rulebook-btn"
+        >
+          <FileText className="w-4 h-4 text-orange-400" />
+          <span>Rulebook</span>
+        </button>
+      </nav>
+
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
         <div className="md:hidden bg-[var(--surface-drawer)] border-b border-cyan-500/30 px-4 py-6 space-y-4 animate-fadeIn">
@@ -237,23 +225,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="mobile-portal-admin-btn"
             >
               Admin
-            </button>
-          </div>
-
-          {/* Mobile Theme Toggle */}
-          <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-            <span className="text-xs font-semibold text-slate-400">Theme</span>
-            <button
-              onClick={toggleTheme}
-              aria-label={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 border transition-colors ${
-                isLight
-                  ? 'bg-white text-slate-800 border-slate-300'
-                  : 'bg-slate-800 text-white border-slate-600'
-              }`}
-            >
-              {isLight ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-cyan-400" />}
-              {isLight ? 'Light Mode' : 'Dark Mode'}
             </button>
           </div>
 

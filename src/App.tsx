@@ -12,16 +12,12 @@ import { RegistrationModal } from './components/RegistrationModal';
 import { RulebookModal } from './components/RulebookModal';
 import { ParticipantPortal } from './components/ParticipantPortal';
 import { AdminPortal } from './components/AdminPortal';
-import { CursorSpotlight } from './components/CursorSpotlight';
 import { CyberAtmosphereBackground } from './components/CyberAtmosphereBackground';
-import { useTheme } from './theme';
 import { COLLEGE_INFO, HACKATHON_SCHEDULE } from './data/mockData';
 import { PortalView } from './types';
-import { Rocket, Heart, Globe, ArrowUp, Sun, Moon } from 'lucide-react';
+import { Heart, Globe, ArrowUp } from 'lucide-react';
 
 export default function App() {
-  const { theme, toggleTheme } = useTheme();
-  const isLight = theme === 'light';
   const [currentView, setCurrentView] = useState<PortalView>('landing');
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [isRulebookModalOpen, setIsRulebookModalOpen] = useState(false);
@@ -103,8 +99,7 @@ export default function App() {
       {/* Global Dynamic Cyber Atmosphere & Particle Aurora Background */}
       <CyberAtmosphereBackground />
 
-      {/* Interactive Cursor Spotlight Glow */}
-      <CursorSpotlight />
+      
 
       {/* Top Reading Scroll Progress Indicator Bar */}
       <div 
@@ -134,15 +129,15 @@ export default function App() {
               <div className="cyber-section-divider" />
             </>
           )}
-          {homeSections.about && (
-            <>
-              <AboutSection />
-              <div className="cyber-section-divider" />
-            </>
-          )}
           {homeSections.themes && (
             <>
               <ThemesSection onOpenRegister={() => setIsRegisterModalOpen(true)} />
+              <div className="cyber-section-divider" />
+            </>
+          )}
+          {homeSections.about && (
+            <>
+              <AboutSection />
               <div className="cyber-section-divider" />
             </>
           )}
@@ -201,18 +196,6 @@ export default function App() {
       {/* Floating CTA & Scroll-To-Top Control Group */}
       {currentView === 'landing' && (
         <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3">
-          {/* Theme Toggle */}
-          <button
-            onClick={toggleTheme}
-            aria-label={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
-            title={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
-            id="floating-theme-toggle-btn"
-            className="p-3 rounded-full bg-slate-900/80 backdrop-blur-md border border-cyan-500/40 shadow-[0_0_20px_rgba(34,211,238,0.3)] btn-tactile relative overflow-hidden"
-          >
-            <Sun className={`w-5 h-5 text-amber-400 transition-all duration-300 ${isLight ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-50'}`} />
-            <Moon className={`w-5 h-5 text-cyan-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 transition-all duration-300 ${isLight ? 'opacity-0 rotate-90 scale-50' : 'opacity-100 rotate-0 scale-100'}`} />
-          </button>
-
           {/* Scroll To Top Button */}
           {showScrollTop && (
             <button
@@ -225,15 +208,6 @@ export default function App() {
             </button>
           )}
 
-          {/* Quick Registration Floating Button */}
-          <button
-            onClick={() => setIsRegisterModalOpen(true)}
-            className="group px-5 py-3 rounded-full bg-gradient-to-r from-pink-600 via-fuchsia-600 to-orange-500 text-white font-black text-xs sm:text-sm shadow-[0_0_30px_rgba(236,72,153,0.5)] hover:shadow-[0_0_40px_rgba(236,72,153,0.8)] btn-tactile flex items-center gap-2 border border-pink-300/40"
-            id="floating-register-btn"
-          >
-            <Rocket className="w-4 h-4 animate-bounce text-yellow-300" />
-            <span>Register Team Now</span>
-          </button>
         </div>
       )}
 
