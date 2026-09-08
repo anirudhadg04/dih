@@ -32,7 +32,7 @@ with thousands of concurrent visitors**, and what has already been wired in.
    store), and forced again on graceful shutdown. The server also survives
    `SIGINT`/`SIGTERM` cleanly without losing data.
 
-6. **Multi-core (cluster) mode** — *optional*, see below.
+6. **Multi-core (cluster) mode** — _optional_, see below.
 
 ### Participant-registration backup
 
@@ -41,6 +41,32 @@ Every successful registration appends one row per participant to
 It is server-side, Excel-compatible, and omits access passwords and payment
 screenshots. On production, configure `DATA_DIR` so generated data is kept
 outside the deployed code directory.
+
+### Optional GitHub CSV synchronization
+
+If administrators intentionally want every registration committed to a private
+GitHub repository, enable the opt-in sync on the server:
+
+```env
+GITHUB_BACKUP_SYNC=true
+GITHUB_BACKUP_REPO_DIR=/opt/anvation
+GITHUB_BACKUP_RELATIVE_PATH=backups/participant-registration-backup.csv
+GITHUB_BACKUP_REMOTE=origin
+GITHUB_BACKUP_BRANCH=main
+```
+
+The server serializes syncs. For each registration it appends the CSV, copies
+it into the Git checkout if `BACKUP_DIR` is elsewhere, commits only the CSV,
+and pushes `main`. The registration is rejected with a retryable error if the
+push fails, so the website never confirms a registration that was not published
+to the configured backup repository.
+
+The runtime user must have a GitHub SSH deploy key with write access to the
+private repository, or an already-configured credential helper. Never place a
+personal access token, SSH private key, or participant CSV in source control.
+This feature creates one Git commit per registration and is unsuitable for
+Netlify Functions or other stateless/serverless hosts; use private object
+storage/database exports there instead.
 
 ## Standard deployment (recommended baseline)
 
@@ -124,13 +150,12 @@ shape this architecture is designed for.
 3. **If you need more than one machine** (horizontal scale), move the mutable
    state out of the file store into a shared database, because the current
    in-memory + `server-data.json` store is single-node by design:
-
-   * Add **PostgreSQL** (or SQLite with WAL if staying single-node).
-   * New tables: `teams`, `members`, `submissions`, `checkins`, `scorecards`,
+   - Add **PostgreSQL** (or SQLite with WAL if staying single-node).
+   - New tables: `teams`, `members`, `submissions`, `checkins`, `scorecards`,
      `announcements`, `cms_config`.
-   * Replace the `teams.push(...)` / `markDirty()` mutations with `INSERT/UPDATE`
+   - Replace the `teams.push(...)` / `markDirty()` mutations with `INSERT/UPDATE`
      queries, and read aggregations (`GET /api/teams`) with `SELECT`.
-   * Point all cluster workers (or multiple hosts) at the DB. At that point you
+   - Point all cluster workers (or multiple hosts) at the DB. At that point you
      can run many identical instances behind a load balancer with full
      redundancy.
 
@@ -140,13 +165,13 @@ shape this architecture is designed for.
 
 ## Quick reference (new env vars)
 
-| Variable           | Default | Meaning                                                      |
-|--------------------|---------|--------------------------------------------------------------|
-| `PORT`             | `3001`  | Public port for single-process mode / cluster workers.        |
-| `INTERNAL_PORT`    | `3002`  | Private loopback port used by the cluster authority.          |
-| `CLUSTER_WORKERS`  | off     | `auto` (all cores − 1) or a number of worker processes; empty disables. |
-| `NODE_ENV`         | —       | `production` serves the built `dist/`; otherwise Vite dev.    |
-| `SMTP_*`           | —       | Email delivery (see `.env.example`).                          |
+| Variable          | Default | Meaning                                                                 |
+| ----------------- | ------- | ----------------------------------------------------------------------- |
+| `PORT`            | `3001`  | Public port for single-process mode / cluster workers.                  |
+| `INTERNAL_PORT`   | `3002`  | Private loopback port used by the cluster authority.                    |
+| `CLUSTER_WORKERS` | off     | `auto` (all cores − 1) or a number of worker processes; empty disables. |
+| `NODE_ENV`        | —       | `production` serves the built `dist/`; otherwise Vite dev.              |
+| `SMTP_*`          | —       | Email delivery (see `.env.example`).                                    |
 
 > Existing `.env` values are only read if the matching OS env var is not already
 > set, so `CLUSTER_WORKERS` / `INTERNAL_PORT` in `.env` will be respected.

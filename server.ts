@@ -2,8 +2,10 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
 import httpx from "node:http";
 import os from "node:os";
+import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import nodemailer from "nodemailer";
 import QRCode from "qrcode";
@@ -12,6 +14,8 @@ import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
+
+const execFileAsync = promisify(execFile);
 
 declare global {
   namespace Express {
@@ -570,6 +574,17 @@ export async function startServer() {
   // finish registration at nearly the same time. Async I/O keeps the Node
   // event loop available to receive other requests while a write is pending.
   let participantBackupWriteQueue: Promise<void> = Promise.resolve();
+  let githubBackupSyncQueue: Promise<void> = Promise.resolve();
+  const githubBackupSyncEnabled = /^(1|true|yes)$/i.test(String(process.env.GITHUB_BACKUP_SYNC || ""));
+  const githubBackupRepoDir = path.resolve((process.env.GITHUB_BACKUP_REPO_DIR || process.cwd()).trim());
+  const githubBackupRelativePath = String(process.env.GITHUB_BACKUP_RELATIVE_PATH || "backups/participant-registration-backup.csv")
+    .trim()
+    .replace(/\\/g, "/");
+  const githubBackupTrackedFile = path.resolve(githubBackupRepoDir, githubBackupRelativePath);
+  const githubBackupRepoPrefix = `${githubBackupRepoDir}${path.sep}`;
+  if (githubBackupSyncEnabled && !githubBackupTrackedFile.startsWith(githubBackupRepoPrefix)) {
+    throw new Error("GITHUB_BACKUP_RELATIVE_PATH must stay inside GITHUB_BACKUP_REPO_DIR.");
+  }
 
   const csvCell = (value: unknown): string => {
     let text = value === null || value === undefined ? "" : String(value);
@@ -661,6 +676,38 @@ export async function startServer() {
     // the caller of the failed registration receives a retryable 503 response.
     participantBackupWriteQueue = participantBackupWriteQueue.catch(() => undefined).then(write);
     return participantBackupWriteQueue;
+  };
+
+  const syncParticipantBackupToGitHub = (team: Team): Promise<void> => {
+    if (!githubBackupSyncEnabled) return Promise.resolve();
+
+    const sync = async () => {
+      await fs.promises.mkdir(path.dirname(githubBackupTrackedFile), { recursive: true });
+      if (path.resolve(PARTICIPANT_BACKUP_FILE) !== githubBackupTrackedFile) {
+        await fs.promises.copyFile(PARTICIPANT_BACKUP_FILE, githubBackupTrackedFile);
+      }
+
+      const git = (args: string[]) => execFileAsync("git", ["-C", githubBackupRepoDir, ...args], {
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+      });
+      const remote = String(process.env.GITHUB_BACKUP_REMOTE || "origin").trim();
+      const branch = String(process.env.GITHUB_BACKUP_BRANCH || "main").trim();
+      const relativePath = path.relative(githubBackupRepoDir, githubBackupTrackedFile).replace(/\\/g, "/");
+
+      await git(["config", "user.name", process.env.GITHUB_BACKUP_AUTHOR_NAME || "ANVATION Backup Bot"]);
+      await git(["config", "user.email", process.env.GITHUB_BACKUP_AUTHOR_EMAIL || "anvation-backup@users.noreply.github.com"]);
+      await git(["add", "--", relativePath]);
+      const status = await git(["status", "--porcelain", "--", relativePath]);
+      if (status.stdout.trim()) {
+        await git(["commit", "-m", `Update participant backup after ${team.id}`]);
+      }
+      await git(["push", remote, `HEAD:${branch}`]);
+      console.log(`[BACKUP] Pushed participant CSV update for ${team.id} to ${remote}/${branch}.`);
+    };
+
+    githubBackupSyncQueue = githubBackupSyncQueue.catch(() => undefined).then(sync);
+    return githubBackupSyncQueue;
   };
 
   app.use((req, res, next) => {
@@ -943,6 +990,16 @@ export async function startServer() {
         return res.status(503).json({
           success: false,
           error: "Registration backup is temporarily unavailable. Please retry in a moment; no registration has been recorded."
+        });
+      }
+
+      try {
+        await syncParticipantBackupToGitHub(newTeam);
+      } catch (syncError) {
+        console.error("[BACKUP] GitHub CSV sync failed; registration was not accepted:", syncError);
+        return res.status(503).json({
+          success: false,
+          error: "Registration backup could not be published. Please retry in a moment; no registration has been recorded."
         });
       }
 
