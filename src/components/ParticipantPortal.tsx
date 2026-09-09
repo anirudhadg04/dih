@@ -38,6 +38,14 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
   const [loginPass, setLoginPass] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string>('');
+  const [resetMessage, setResetMessage] = useState<string>('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetCooldown, setResetCooldown] = useState(false);
+  const [resetToken, setResetToken] = useState<string>(() => new URLSearchParams(window.location.search).get('resetToken') || '');
+  const [newResetPassword, setNewResetPassword] = useState('');
+  const [confirmResetPassword, setConfirmResetPassword] = useState('');
+  const [resetCompletionMessage, setResetCompletionMessage] = useState('');
+  const [resetCompletionError, setResetCompletionError] = useState('');
   const [activeTab, setActiveTab] = useState<'overview' | 'milestones' | 'submit' | 'announcements' | 'certificate' | 'support'>('overview');
 
   const [allTeams, setAllTeams] = useState<Team[]>(SEED_TEAMS);
@@ -108,16 +116,6 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
   const [gateQrReady, setGateQrReady] = useState(false);
 
   const currentTeam = allTeams.find(t => t.id === authenticatedTeamId) || allTeams[0] || SEED_TEAMS[0];
-  const recoveryIdentifier = loginTeamId.trim().toLowerCase();
-  const recoveryTeam = recoveryIdentifier
-    ? allTeams.find((team) => [team.id, team.regNumber, team.teamName, team.leaderEmail]
-      .filter(Boolean)
-      .some((value) => String(value).trim().toLowerCase() === recoveryIdentifier))
-    : undefined;
-  const leaderRecoveryEmail = recoveryTeam?.leaderEmail;
-  const recoveryMailto = leaderRecoveryEmail
-    ? `mailto:${leaderRecoveryEmail}?subject=${encodeURIComponent(`ANVATION 2026 portal password reset - ${recoveryTeam.id}`)}&body=${encodeURIComponent(`Hello ${recoveryTeam.teamName} team leader,\n\nPlease contact the event administrator to reset the Participant Portal password for team ${recoveryTeam.id} (${recoveryTeam.regNumber}).\n\nDo not send the current password by email.`)}`
-    : undefined;
 
   useEffect(() => {
     fetchData();
@@ -414,6 +412,67 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
     }
   };
 
+  const handlePasswordResetRequest = async () => {
+    const identifier = loginTeamId.trim();
+    if (!identifier || resetLoading || resetCooldown) {
+      if (!identifier) setResetMessage('Enter your Team ID or registration number first.');
+      return;
+    }
+
+    setResetLoading(true);
+    setResetMessage('');
+    try {
+      const res = await fetch('/api/participant/request-password-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier })
+      });
+      const data = await res.json();
+      setResetMessage(data.message || 'If the team exists and its leader email is eligible, a password reset message has been sent.');
+      setResetCooldown(true);
+      window.setTimeout(() => setResetCooldown(false), 30000);
+    } catch (err) {
+      console.error(err);
+      setResetMessage('Unable to process the reset request right now. Please try again later.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const handlePasswordResetCompletion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newResetPassword.length < 8) {
+      setResetCompletionError('Choose a password with at least 8 characters.');
+      return;
+    }
+    if (newResetPassword !== confirmResetPassword) {
+      setResetCompletionError('The passwords do not match.');
+      return;
+    }
+
+    setResetCompletionError('');
+    try {
+      const res = await fetch('/api/participant/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: resetToken, newPassword: newResetPassword })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setResetCompletionError(data.error || 'The reset link is invalid or expired.');
+        return;
+      }
+      setResetCompletionMessage(data.message || 'Your team portal password has been reset. You can now sign in.');
+      setResetToken('');
+      window.history.replaceState({}, '', '/participant');
+      setNewResetPassword('');
+      setConfirmResetPassword('');
+    } catch (err) {
+      console.error(err);
+      setResetCompletionError('Unable to complete the password reset right now.');
+    }
+  };
+
   const handleSignOut = () => {
     setIsLoggedIn(false);
     setLoginError('');
@@ -449,6 +508,40 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
               <span>{loginError}</span>
             </div>
+          )}
+
+          {resetCompletionMessage && (
+            <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-xs text-emerald-200 font-semibold" role="status">
+              {resetCompletionMessage}
+            </div>
+          )}
+
+          {resetToken && (
+            <form onSubmit={handlePasswordResetCompletion} className="p-4 rounded-xl bg-cyan-950/30 border border-cyan-500/40 space-y-3">
+              <div className="text-sm font-bold text-cyan-200">Choose a new team portal password</div>
+              <input
+                type="password"
+                value={newResetPassword}
+                onChange={(e) => setNewResetPassword(e.target.value)}
+                placeholder="New password (8+ characters)"
+                minLength={8}
+                maxLength={128}
+                required
+                className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs focus:outline-none focus:border-cyan-400"
+              />
+              <input
+                type="password"
+                value={confirmResetPassword}
+                onChange={(e) => setConfirmResetPassword(e.target.value)}
+                placeholder="Confirm new password"
+                minLength={8}
+                maxLength={128}
+                required
+                className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs focus:outline-none focus:border-cyan-400"
+              />
+              {resetCompletionError && <p className="text-[11px] text-red-300" role="alert">{resetCompletionError}</p>}
+              <button type="submit" className="w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold">Set New Password</button>
+            </form>
           )}
 
           {/* Login Form */}
@@ -512,19 +605,19 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
               <MessageSquare className="w-4 h-4" /> Forgot your team password?
             </div>
             <p className="text-[11px] text-slate-400">
-              Enter your Team ID or registration number above, then email the team leader to request an admin reset.
+              Enter your Team ID or registration number above. Reset instructions will be sent to the registered team leader email.
             </p>
-            {recoveryMailto ? (
-              <a
-                href={recoveryMailto}
-                className="inline-flex items-center gap-1.5 text-cyan-300 hover:text-cyan-200 font-bold"
-                id="participant-forgot-password-link"
-              >
-                <Mail className="w-3.5 h-3.5" /> Email team leader ({leaderRecoveryEmail})
-              </a>
-            ) : (
-              <span className="text-[11px] text-slate-500">A team leader email link will appear after you enter a valid Team ID.</span>
-            )}
+            <button
+              type="button"
+              onClick={handlePasswordResetRequest}
+              disabled={resetLoading || resetCooldown}
+              className="inline-flex items-center gap-1.5 text-cyan-300 hover:text-cyan-200 disabled:text-slate-500 font-bold"
+              id="participant-forgot-password-link"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              {resetLoading ? 'Sending reset message...' : resetCooldown ? 'Please wait before trying again' : 'Send reset message'}
+            </button>
+            {resetMessage && <p className="text-[11px] text-cyan-200" role="status">{resetMessage}</p>}
           </div>
 
         </div>

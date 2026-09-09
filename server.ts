@@ -77,18 +77,22 @@ try {
 
 // Diagnose the most common email misconfigurations up-front so missing mail is
 // easy to spot in the server console instead of silently producing .eml files.
+function getSmtpConfig(): { configured: boolean; missing: string[] } {
+  const required = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM"];
+  const missing = required.filter((key) => !String(process.env[key] || "").trim());
+  return { configured: missing.length === 0, missing };
+}
+
 (function checkSmtpConfig() {
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER || "";
-  if (!host) {
-    console.warn("[EMAIL] SMTP_HOST is NOT set — confirmation emails will NOT be delivered. They are only generated as downloadable .eml files. Set SMTP_HOST/SMTP_USER/SMTP_PASS in .env to send real mail.");
+  const smtp = getSmtpConfig();
+  if (!smtp.configured) {
+    console.warn(`[EMAIL] SMTP is not fully configured. Missing: ${smtp.missing.join(", ")}. Real mail will not be sent; .eml fallback remains available.`);
     return;
   }
-  const hostLc = host.toLowerCase();
-  if (hostLc.includes("gmail") && user && !user.toLowerCase().endsWith("@gmail.com")) {
-    console.warn(`[EMAIL] MISCONFIGURED SMTP: SMTP_HOST=${host} (Gmail) does not match SMTP_USER=${user}. Gmail SMTP only accepts @gmail.com accounts with an App Password. Emails will FAIL to be delivered until this is fixed in .env.`);
-  } else if (hostLc.includes("gmail") && user && user.toLowerCase().endsWith("@gmail.com") && !process.env.SMTP_PASS) {
-    console.warn("[EMAIL] Gmail SMTP requires an App Password in SMTP_PASS (not your normal login password). Mail will fail to authenticate without it.");
+  const host = String(process.env.SMTP_HOST).toLowerCase();
+  const user = String(process.env.SMTP_USER).toLowerCase();
+  if (host.includes("gmail") && !user.endsWith("@gmail.com")) {
+    console.warn("[EMAIL] Gmail SMTP requires SMTP_USER to be a Gmail address and SMTP_PASS to be a Gmail App Password.");
   }
 })();
 
@@ -450,6 +454,8 @@ export async function startServer() {
   const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
   const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_BOOTSTRAP_PASSWORD || "change-me-in-dev-only";
   const sessionStore = new Map<string, { user: { id: string; type: "admin" | "participant"; role?: string; email?: string; username?: string; name?: string; teamId?: string; expiresAt: number; }; expiresAt: number }>();
+  const passwordResetTokens = new Map<string, { teamId: string; expiresAt: number }>();
+  const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000;
 
   function sanitizeAdminUser(user: Partial<AdminUser> | null | undefined) {
     if (!user) return user;
@@ -482,6 +488,12 @@ export async function startServer() {
       Array.from({ length: 4 }, () => alphabet[crypto.randomInt(0, alphabet.length)]).join("")
     );
     return groups.join("-");
+  }
+
+  function generatePasswordResetToken(): { rawToken: string; tokenHash: string } {
+    const rawToken = crypto.randomBytes(32).toString("base64url");
+    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+    return { rawToken, tokenHash };
   }
 
   function verifyPassword(password: string, storedHash?: string): boolean {
@@ -610,7 +622,7 @@ export async function startServer() {
     legacyHeaders: true,
     message: { success: false, error: "Too many attempts from this IP. Please wait a moment and retry." },
   });
-  app.use(["/api/participant-login", "/api/admin-login", "/api/send-registration-email", "/api/register", "/api/verify-payment", "/api/finance/verify-utr"], authLimiter);
+  app.use(["/api/participant-login", "/api/participant/request-password-reset", "/api/participant/reset-password", "/api/admin-login", "/api/send-registration-email", "/api/register", "/api/verify-payment", "/api/finance/verify-utr"], authLimiter);
 
   // In-Memory Data Store (Clean initialization)
   let teams: Team[] = [];
@@ -1121,8 +1133,9 @@ export async function startServer() {
     let deliveredCount = 0;
     let failedCount = 0;
 
+    const smtp = getSmtpConfig();
     const smtpHost = process.env.SMTP_HOST;
-    if (smtpHost) {
+    if (smtp.configured && smtpHost) {
       const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: Number(process.env.SMTP_PORT) || 587,
@@ -1132,7 +1145,7 @@ export async function startServer() {
           pass: process.env.SMTP_PASS || ""
         }
       });
-      const from = process.env.MAIL_FROM || `"ANVATION 2026" <${process.env.SMTP_USER || "noreply@anvation.local"}>`;
+      const from = String(process.env.MAIL_FROM);
 
       for (const p of participantList) {
         try {
@@ -1186,6 +1199,26 @@ export async function startServer() {
       markDirty();
       return { success: true, deliveredCount, failedCount: 0, results: recipientResults };
     }
+  }
+
+  async function sendPortalResetEmail(team: Team, resetUrl: string): Promise<void> {
+    const smtp = getSmtpConfig();
+    if (!smtp.configured) throw new Error("SMTP is not fully configured.");
+
+    const transporter = nodemailer.createTransport({
+      host: String(process.env.SMTP_HOST),
+      port: Number(process.env.SMTP_PORT),
+      secure: process.env.SMTP_SECURE === "true",
+      auth: { user: String(process.env.SMTP_USER), pass: String(process.env.SMTP_PASS) }
+    });
+
+    await transporter.sendMail({
+      from: String(process.env.MAIL_FROM),
+      to: team.leaderEmail,
+      subject: `ANVATION 2026 portal password reset - ${team.id}`,
+      text: `A password reset was requested for your ANVATION 2026 team portal.\n\nTeam ID: ${team.id}\nRegistration No: ${team.regNumber}\n\nUse this link within 15 minutes to choose a new password:\n${resetUrl}\n\nIf you did not request this reset, contact the event administrators immediately.`,
+      html: `<p>A password reset was requested for your ANVATION 2026 team portal.</p><p><strong>Team ID:</strong> ${team.id}<br/><strong>Registration No:</strong> ${team.regNumber}</p><p><a href="${resetUrl}">Choose a new portal password</a></p><p>This link expires in 15 minutes. If you did not request this reset, contact the event administrators immediately.</p>`
+    });
   }
 
   // API Routes
@@ -1382,6 +1415,93 @@ export async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/participant/request-password-reset", async (req, res) => {
+    const genericMessage = "If the team exists and its leader email is eligible, a password reset message has been sent.";
+    const identifier = String(req.body?.identifier || "").trim().toLowerCase();
+    if (!identifier) return res.json({ success: true, message: genericMessage });
+
+    const team = teams.find((candidate) =>
+      candidate.id.toLowerCase() === identifier || candidate.regNumber.toLowerCase() === identifier
+    );
+    if (!team || !team.leaderEmail) return res.json({ success: true, message: genericMessage });
+
+    try {
+      if (!getSmtpConfig().configured) return res.json({ success: true, message: genericMessage });
+      for (const [hash, record] of passwordResetTokens.entries()) {
+        if (record.expiresAt <= Date.now()) passwordResetTokens.delete(hash);
+      }
+      const { rawToken, tokenHash } = generatePasswordResetToken();
+      const resetUrl = new URL("/participant", `${req.protocol}://${req.get("host")}`);
+      resetUrl.searchParams.set("resetToken", rawToken);
+      await sendPortalResetEmail(team, resetUrl.toString());
+      passwordResetTokens.set(tokenHash, { teamId: team.id, expiresAt: Date.now() + PASSWORD_RESET_TTL_MS });
+      auditLogs.unshift({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actorEmail: "participant-password-reset",
+        actorRole: "ADMIN",
+        action: "participant_password_reset_requested",
+        target: team.id,
+        reason: "Password reset requested through the participant portal.",
+        ipAddress: getClientIp(req)
+      });
+      return res.json({ success: true, message: genericMessage });
+    } catch (error) {
+      console.error(`[PASSWORD RESET EMAIL] Delivery failed for team ${team.id}.`);
+      return res.json({ success: true, message: genericMessage });
+    }
+  });
+
+  app.post("/api/participant/reset-password", (req, res) => {
+    const token = String(req.body?.token || "").trim();
+    const newPassword = String(req.body?.newPassword || "");
+    if (!token || newPassword.length < 8 || newPassword.length > 128) {
+      return res.status(400).json({ success: false, error: "The reset link is invalid or the new password is not acceptable." });
+    }
+
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const tokenRecord = passwordResetTokens.get(tokenHash);
+    if (!tokenRecord || tokenRecord.expiresAt <= Date.now()) {
+      passwordResetTokens.delete(tokenHash);
+      return res.status(400).json({ success: false, error: "The reset link is invalid or expired." });
+    }
+
+    const team = teams.find((candidate) => candidate.id === tokenRecord.teamId);
+    if (!team) {
+      passwordResetTokens.delete(tokenHash);
+      return res.status(400).json({ success: false, error: "The reset link is invalid or expired." });
+    }
+
+    const previousHash = team.accessPassword;
+    team.accessPassword = hashPassword(newPassword);
+    try {
+      if (!persistNow()) {
+        team.accessPassword = previousHash;
+        return res.status(500).json({ success: false, error: "The password could not be reset right now." });
+      }
+      passwordResetTokens.delete(tokenHash);
+      for (const [sessionId, session] of sessionStore.entries()) {
+        if (session.user.type === "participant" && session.user.teamId === team.id) sessionStore.delete(sessionId);
+      }
+      auditLogs.unshift({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actorEmail: "participant-password-reset",
+        actorRole: "ADMIN",
+        action: "participant_password_reset_completed",
+        target: team.id,
+        reason: "Password reset completed through a single-use leader email token.",
+        ipAddress: getClientIp(req)
+      });
+      persistNow();
+      return res.json({ success: true, message: "Your team portal password has been reset. You can now sign in." });
+    } catch (error) {
+      team.accessPassword = previousHash;
+      persistNow();
+      return res.status(500).json({ success: false, error: "The password could not be reset right now." });
     }
   });
 
@@ -1618,8 +1738,8 @@ export async function startServer() {
         failedCount: report.failedCount,
         recipients: report.results.map(r => r.recipient),
         emailRecipients: report.results,
-        transport: process.env.SMTP_HOST ? "SMTP" : "LOCAL",
-        smtpConfigured: !!process.env.SMTP_HOST
+        transport: getSmtpConfig().configured ? "SMTP" : "LOCAL",
+        smtpConfigured: getSmtpConfig().configured
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -1641,8 +1761,8 @@ export async function startServer() {
         failedCount: report.failedCount,
         recipients: report.results.map(r => r.recipient),
         emailRecipients: report.results,
-        transport: process.env.SMTP_HOST ? "SMTP" : "LOCAL",
-        smtpConfigured: !!process.env.SMTP_HOST
+        transport: getSmtpConfig().configured ? "SMTP" : "LOCAL",
+        smtpConfigured: getSmtpConfig().configured
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -1852,14 +1972,15 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       // Same body but with the QR referenced by its cid so it renders in Gmail.
       const htmlMail = htmlOpen + htmlRows.replace(`GATE ENTRY PASS</div>${qrImgForEml}`, `GATE ENTRY PASS</div>${qrImgForMail}`);
       const eml = [`From: "ANVATION 2026" <noreply@anvation.local>`, `To: ${to}`, `Subject: ${subject}`, `Date: ${dateStr}`, `MIME-Version: 1.0`, `Content-Type: text/html; charset=UTF-8`, "", `${htmlFull}`].join("\r\n");
+      const smtp = getSmtpConfig();
       const smtpHost = process.env.SMTP_HOST;
-      const smtpConfigured = !!smtpHost;
+      const smtpConfigured = smtp.configured;
       let delivered = 0, failed = 0;
       let smtpError = "";
-      const emailRecipients: Array<{ recipient: string; status: string; error?: string }> = [];
-      if (smtpHost) {
-        const transporter = nodemailer.createTransport({ host: smtpHost, port: Number(process.env.SMTP_PORT) || 587, secure: process.env.SMTP_SECURE === "true", auth: { user: process.env.SMTP_USER || "", pass: process.env.SMTP_PASS || "" } });
-        const from = process.env.MAIL_FROM || `"ANVATION 2026" <${process.env.SMTP_USER || "noreply@anvation.local"}>`;
+      const emailRecipients: Array<{ recipient: string; status: string }> = [];
+      if (smtp.configured && smtpHost) {
+        const transporter = nodemailer.createTransport({ host: smtpHost, port: Number(process.env.SMTP_PORT), secure: process.env.SMTP_SECURE === "true", auth: { user: String(process.env.SMTP_USER), pass: String(process.env.SMTP_PASS) } });
+        const from = String(process.env.MAIL_FROM);
         // Verify the SMTP connection (login/auth) once before sending so a bad
         // host or invalid credentials surface a clear, logged error instead of
         // silently producing only a downloadable .eml file.
@@ -1870,9 +1991,9 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
           console.error(`[EMAIL] SMTP verification failed: ${smtpError}`);
         }
         if (smtpError) {
-          emailRecipients.push(...recipientList.map((r) => ({ recipient: r, status: "FAILED", error: smtpError })));
+          emailRecipients.push(...recipientList.map((r) => ({ recipient: r, status: "FAILED" })));
           failed = recipientList.length;
-          return res.json({ success: false, smtpConfigured: true, smtpError, deliveredCount: 0, failedCount: failed, recipients: recipientList, emailRecipients, transport: "SMTP", gatewayMessage: `SMTP is configured but the connection check failed: ${smtpError}. No emails were delivered. Double-check SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS (Gmail requires an App Password, not your login password).`, subject, eml });
+          return res.json({ success: false, smtpConfigured: true, deliveredCount: 0, failedCount: failed, recipients: recipientList, emailRecipients, transport: "SMTP", gatewayMessage: "Email delivery is temporarily unavailable. The downloadable .eml fallback is available." , subject, eml });
         }
         for (const recipient of recipientList) {
           try {
@@ -1896,18 +2017,18 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
             console.log(`[EMAIL SENT] To: ${recipient} | Team: ${teamId} | ${info.messageId}`);
           } catch (mailErr: any) {
             failed++;
-            emailRecipients.push({ recipient, status: "FAILED", error: String(mailErr.message || mailErr) });
+            emailRecipients.push({ recipient, status: "FAILED" });
             console.error(`[EMAIL FAILED] To: ${recipient} | Team: ${teamId} | ${mailErr.message}`);
           }
         }
         res.json({ success: delivered > 0, deliveredCount: delivered, failedCount: failed, recipients: recipientList, emailRecipients, transport: "SMTP", gatewayMessage: delivered > 0 ? "Confirmation emails sent to all participants." : (failed === recipientList.length ? "SMTP is configured but delivery failed — double-check SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS." : "Some emails could not be delivered."), subject, eml, smtpConfigured });
       } else {
-        console.warn(`[EMAIL] SMTP NOT CONFIGURED (SMTP_HOST missing) — real mail was NOT delivered. Generated local .eml for: ${recipientList.join(", ")} | Team: ${teamId}`);
-        res.json({ success: true, message: "SMTP not configured — real emails were NOT sent to participants. To actually deliver the confirmation mail (with the Gate Pass QR + college) to leader/member inboxes, set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS and MAIL_FROM, then restart the server. A downloadable .eml was generated as a fallback.", recipients: recipientList, emailRecipients: recipientList.map(r => ({ recipient: r, status: "READY" })), deliveredCount: recipientList.length, failedCount: 0, subject, eml, smtpConfigured: false });
+        console.warn(`[EMAIL] SMTP incomplete (${smtp.missing.join(", ")}) — real mail was NOT delivered. Generated local .eml fallback for team ${teamId}.`);
+        res.json({ success: true, message: "SMTP is not fully configured, so real emails were not sent. A downloadable .eml was generated as a fallback.", recipients: recipientList, emailRecipients: recipientList.map(r => ({ recipient: r, status: "READY" })), deliveredCount: 0, failedCount: 0, subject, eml, smtpConfigured: false });
       }
     } catch (err: any) {
       console.error("[EMAIL ERROR]", err);
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, error: "Email delivery could not be completed." });
     }
   });
 

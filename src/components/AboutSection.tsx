@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { COLLEGE_INFO } from '../data/mockData';
 import { Target, Eye, Award, MapPin } from 'lucide-react';
 import campusBgImage from '../assets/images/kssem_campus_real_1788194089427.jpg';
+import pygenarcBrandImage from '../assets/images/WhatsApp Image 2026-09-09 at 9.58.19 PM.jpeg';
 
 export const AboutSection: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'college' | 'ksgi' | 'dept' | 'vision' | 'campus'>('college');
@@ -80,8 +81,11 @@ export const AboutSection: React.FC = () => {
                 </p>
               </div>
               <div className="relative rounded-2xl overflow-hidden border border-cyan-500/30 shadow-2xl bg-slate-950/70 p-8 text-center">
-                <div className="text-5xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-fuchsia-300 to-amber-300">PyGenicArc</div>
-                <div className="mt-3 text-xs uppercase tracking-[0.25em] text-cyan-300">AI • Cloud • Virtual Labs</div>
+                <img
+                  src={pygenarcBrandImage}
+                  alt="PyGenicArc - AI, Cloud, and Virtual Labs"
+                  className="mx-auto block w-full max-w-[320px] h-auto max-h-48 object-contain"
+                />
               </div>
             </div>
           )}
