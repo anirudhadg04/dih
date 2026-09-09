@@ -11,11 +11,26 @@ import nodemailer from "nodemailer";
 import QRCode from "qrcode";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
+import { createWorker } from "tesseract.js";
 import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 
 const execFileAsync = promisify(execFile);
+
+let paymentOcrWorkerPromise: Promise<any> | null = null;
+
+async function readPaymentProofText(imageBytes: Buffer): Promise<string> {
+  if (!paymentOcrWorkerPromise) {
+    paymentOcrWorkerPromise = createWorker("eng").catch((error) => {
+      paymentOcrWorkerPromise = null;
+      throw error;
+    });
+  }
+  const worker = await paymentOcrWorkerPromise;
+  const result = await worker.recognize(imageBytes);
+  return String(result?.data?.text || "");
+}
 
 declare global {
   namespace Express {
@@ -1061,7 +1076,7 @@ export async function startServer() {
   });
 
   // Verify PhonePe Payment Endpoint
-  app.post("/api/verify-payment", (req, res) => {
+  app.post("/api/verify-payment", async (req, res) => {
     try {
       const { utr, amount, paymentScreenshot } = req.body;
       const expectedAmount = Number(amount) || cmsConfig.registrationFee;
@@ -1117,6 +1132,44 @@ export async function startServer() {
         });
       }
 
+      let proofText = "";
+      try {
+        proofText = await readPaymentProofText(screenshotBytes);
+      } catch (ocrError: any) {
+        console.error("[PAYMENT OCR] Could not read payment screenshot:", ocrError?.message || ocrError);
+        return res.status(503).json({
+          success: false,
+          verified: false,
+          error: "Payment proof could not be read right now. Please retry once the verification service is available."
+        });
+      }
+
+      const proofTextCompact = proofText.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const expectedUtr = cleanUtr.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const beneficiaryId = "kgsoumya1605okicici";
+      const expectedAmountText = String(expectedAmount).replace(/\.0+$/, "");
+      if (!proofTextCompact.includes(expectedUtr)) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "The uploaded payment screenshot does not contain the UTR you entered. Please upload the receipt for this transaction."
+        });
+      }
+      if (!proofTextCompact.includes(beneficiaryId)) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "The uploaded payment screenshot does not show the required PhonePe UPI ID kgsoumya1605@okicici."
+        });
+      }
+      if (!proofTextCompact.includes(expectedAmountText)) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: `The uploaded payment screenshot does not show the expected payment amount of ₹${expectedAmount}.`
+        });
+      }
+
       res.json({
         success: true,
         verified: true,
@@ -1124,7 +1177,7 @@ export async function startServer() {
         amount: expectedAmount,
         beneficiary: "ANVATION 2026 (kgsoumya1605@okicici)",
         verifiedAt: new Date().toISOString(),
-        message: `Payment proof received: UTR format and uploaded image verified locally for ₹${expectedAmount}. Final settlement must be confirmed by the admin desk.`
+        message: `Payment proof OCR matched the UTR, beneficiary, and amount for ₹${expectedAmount}. Final settlement must still be confirmed by the admin desk.`
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
