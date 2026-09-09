@@ -348,7 +348,11 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.error || `Payment verification service returned HTTP ${res.status}.`);
+      }
 
       if (data.success && data.verified) {
         const verifiedUtr = data.utr || utrToVerify;
@@ -368,7 +372,13 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         verifyingRef.current = false;
       }
     } catch (err: any) {
-      setPaymentFailError("Payment Verification Failed: Gateway network timeout. Please verify your UTR and retry.");
+      const message = err instanceof Error ? err.message : '';
+      const isNetworkFailure = err instanceof TypeError || !message;
+      setPaymentFailError(
+        isNetworkFailure
+          ? "Payment verification service is unreachable. Please check your connection and retry. Your UTR and screenshot are still in this form."
+          : `Payment verification failed: ${message}`
+      );
       setShowPaymentFailModal(true);
       setPaymentVerifying(false);
       verifyingRef.current = false;
