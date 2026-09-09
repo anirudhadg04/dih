@@ -14,7 +14,7 @@ export const RulebookModal: React.FC<RulebookModalProps> = ({ isOpen, onClose })
     const rulebookHtml = `
       <h2>1. ELIGIBILITY & TEAM COMPOSITION</h2>
       <p>• Open to all undergraduate (B.E./B.Tech/BCA/B.Sc) and postgraduate (M.Tech/MCA/M.Sc) students across India.</p>
-      <p>• Team size MUST be strictly 2 to 4 members.</p>
+      <p>• Team size: 2 to 4 members (1 Leader + 1 to 3 Additional Members).</p>
       <p>• Inter-departmental and inter-college teams are permitted.</p>
 
       <h2>2. CODE OF CONDUCT & ENVIRONMENT</h2>
@@ -75,7 +75,7 @@ export const RulebookModal: React.FC<RulebookModalProps> = ({ isOpen, onClose })
               1. Team Eligibility & Size
             </h4>
             <p className="text-xs leading-relaxed text-slate-300">
-              Open to all full-time undergraduate and postgraduate engineering & computer science students in India. Teams must consist of 2 to 4 members. Inter-college cross-teams are allowed.
+              Open to all full-time undergraduate and postgraduate engineering & computer science students in India. Teams must consist of <strong>2 to 4 members</strong> (1 Leader + 1 to 3 Additional Members). Inter-college cross-teams are allowed.
             </p>
           </div>
 

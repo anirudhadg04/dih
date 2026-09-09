@@ -77,10 +77,26 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     emergencyContact: ''
   });
 
-  // Members State (Member 2, Member 3, Member 4)
-  const [members, setMembers] = useState<Array<{ fullName: string; email: string; phone: string; usn: string; college: string }>>([
-    { fullName: '', email: '', phone: '', usn: '', college: '' }
-  ]);
+  // Members State (1 to 3 additional members: Members 2, 3, 4)
+  const createDefaultMembers = () => [
+    { fullName: '', email: '', phone: '', usn: '', college: '', gender: 'Male' }
+  ];
+
+  const [members, setMembers] = useState<Array<{ fullName: string; email: string; phone: string; usn: string; college: string; gender: string }>>(
+    createDefaultMembers()
+  );
+
+  const handleAddMember = () => {
+    if (members.length < 3) {
+      setMembers([...members, { fullName: '', email: '', phone: '', usn: '', college: '', gender: 'Male' }]);
+    }
+  };
+
+  const handleRemoveMember = (idx: number) => {
+    if (members.length > 1) {
+      setMembers(members.filter((_, i) => i !== idx));
+    }
+  };
 
   // Fresh start every time the modal is opened. Clears any previously shown
   // registration slip (and leftover form data) so it never reappears when the
@@ -121,7 +137,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       linkedinUrl: '',
       emergencyContact: ''
     });
-    setMembers([{ fullName: '', email: '', phone: '', usn: '', college: '' }]);
+    setMembers(createDefaultMembers());
   };
 
   useEffect(() => {
@@ -156,16 +172,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
   if (!isOpen) return null;
 
-  const handleAddMember = () => {
-    if (members.length < 3) {
-      setMembers([...members, { fullName: '', email: '', phone: '', usn: '', college: '' }]);
-    }
-  };
-
-  const handleRemoveMember = (index: number) => {
-    setMembers(members.filter((_, i) => i !== index));
-  };
-
   const handleUpdateMember = (index: number, field: string, val: string) => {
     const updated = [...members];
     (updated[index] as any)[field] = val;
@@ -194,6 +200,28 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     reader.onerror = () => alert('Could not read the file. Please try again.');
     reader.readAsDataURL(file);
   };
+
+  const currentFeePerParticipant = 1;
+  const currentParticipantCount = 1 + members.length;
+  const currentTotalFee = currentParticipantCount * currentFeePerParticipant;
+
+  const isLeaderValid = Boolean(
+    leader.fullName.trim() &&
+    leader.email.trim() &&
+    leader.usn.trim()
+  );
+
+  const areAllMembersFilled = members.length >= 1 && members.length <= 3 && members.every(m =>
+    Boolean(m.fullName.trim() && m.email.trim() && m.usn.trim())
+  );
+
+  // Email and USN uniqueness check
+  const allParticipantEmails = [leader.email.trim().toLowerCase(), ...members.map(m => m.email.trim().toLowerCase())].filter(Boolean);
+  const allParticipantUsns = [leader.usn.trim().toUpperCase(), ...members.map(m => m.usn.trim().toUpperCase())].filter(Boolean);
+  const hasDuplicateEmail = new Set(allParticipantEmails).size !== allParticipantEmails.length;
+  const hasDuplicateUsn = new Set(allParticipantUsns).size !== allParticipantUsns.length;
+
+  const isStep3Valid = isLeaderValid && areAllMembersFilled && !hasDuplicateEmail && !hasDuplicateUsn;
 
   const handleSubmitRegistration = async (confirmedUtr?: string) => {
     // Double-submission lock: prevents rapid double-clicks or the 500ms
@@ -224,9 +252,18 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         setShowPaymentFailModal(true);
         return;
       }
-      const activeMembers = members.filter(m => m.fullName && m.email);
-      const participantCount = 1 + activeMembers.length;
-      const totalFee = participantCount * currentFeePerParticipant;
+
+      // Check team completeness
+      if (members.length < 1 || members.length > 3 || !areAllMembersFilled) {
+        submittingRef.current = false;
+        setLoading(false);
+        setPaymentVerifying(false);
+        setPaymentFailError("All team members (2 to 4 participants total) must have full details completed before registration.");
+        setShowPaymentFailModal(true);
+        return;
+      }
+
+      const totalFee = currentTotalFee;
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -235,10 +272,10 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
           preferredTrack,
           accommodationRequired,
           leader,
-            members: activeMembers,
-            paymentUtr: finalUtr,
-            paymentAmount: totalFee,
-            paymentScreenshot: paymentScreenshotData || null
+          members,
+          paymentUtr: finalUtr,
+          paymentAmount: totalFee,
+          paymentScreenshot: paymentScreenshotData || null
         })
       });
 
@@ -250,7 +287,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         // Gather all participant emails
         const allEmails = [
           leader.email,
-          ...activeMembers.map(m => m.email).filter(Boolean)
+          ...members.map(m => m.email).filter(Boolean)
         ];
         setDispatchedRecipients(data.emailRecipients || allEmails);
 
@@ -269,7 +306,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               regNumber: data.team.regNumber,
               participants: [
                 { email: leader.email, name: leader.fullName, college: leader.college, role: 'Leader' },
-                ...activeMembers.map(m => ({ email: m.email, name: m.fullName, college: m.college, role: 'Member' }))
+                ...members.map(m => ({ email: m.email, name: m.fullName, college: m.college, role: 'Member' }))
               ].filter(p => p.email)
             })
           });
@@ -297,9 +334,14 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
         setStep(5); // Go straight to confirmation slip!
         confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
+      } else {
+        setPaymentFailError(data.error || "Registration could not be completed.");
+        setShowPaymentFailModal(true);
       }
     } catch (err) {
       console.error('Registration failed:', err);
+      setPaymentFailError("Network error during registration. Please try again.");
+      setShowPaymentFailModal(true);
     } finally {
       setLoading(false);
       setPaymentVerifying(false);
@@ -323,7 +365,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     }
 
     const utrToVerify = (customUtr || paymentUtr || '').trim();
-    const totalFee = (1 + members.filter(m => m.fullName && m.email).length) * currentFeePerParticipant;
+    const totalFee = currentTotalFee;
     const validUtrPattern = /^[A-Z0-9]{12,22}$/i;
 
     if (!utrToVerify || !validUtrPattern.test(utrToVerify)) {
@@ -513,10 +555,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     }
   };
 
-  const currentFeePerParticipant = 1;
-  const currentParticipantCount = 1 + members.filter(m => m.fullName && m.email).length;
-  const currentTotalFee = currentParticipantCount * currentFeePerParticipant;
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
       <div className="bg-[#0b192c] border border-cyan-500/40 rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto relative shadow-2xl">
@@ -597,6 +635,16 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               </select>
             </div>
 
+            <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-200 space-y-1">
+              <div className="font-bold text-white flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Team Composition Rule: 2 to 4 Members</span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Every registered team must consist of <strong>1 Leader + 1 to 3 Additional Members</strong> (2 to 4 participants total).
+              </p>
+            </div>
+
             <button
               disabled={!teamName.trim()}
               onClick={() => setStep(2)}
@@ -618,7 +666,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Full Name:</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Full Name *</label>
                 <input
                   type="text"
                   required
@@ -631,7 +679,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">USN / Roll Number:</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1">USN / Roll Number *</label>
                 <input
                   type="text"
                   required
@@ -644,7 +692,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Email Address:</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Email Address *</label>
                 <input
                   type="email"
                   required
@@ -657,7 +705,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Phone Number:</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Phone Number *</label>
                 <input
                   type="text"
                   required
@@ -667,6 +715,20 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
                   id="reg-leader-phone-input"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Gender</label>
+                <select
+                  value={leader.gender}
+                  onChange={(e) => setLeader({ ...leader, gender: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-cyan-500 focus:outline-none"
+                  id="reg-leader-gender-select"
+                >
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
               </div>
 
               <div>
@@ -681,7 +743,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-bold text-slate-300 mb-1">College Name:</label>
                 <input
                   type="text"
@@ -703,74 +765,124 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 Back
               </button>
               <button
-                disabled={!leader.fullName || !leader.email || !leader.usn}
+                disabled={!isLeaderValid}
                 onClick={() => setStep(3)}
                 className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-xs shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
                 id="reg-step2-next-btn"
               >
-                <span>Next: Add Members 2, 3 & 4</span>
+                <span>Next: Add Team Members (2-4 Total)</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP 3 - MEMBERS 2, 3, 4 */}
+        {/* STEP 3 - ADDITIONAL MEMBERS */}
         {step === 3 && (
           <div className="space-y-4 animate-fadeIn">
             <div className="flex items-center justify-between">
-              <h4 className="font-bold text-white text-sm flex items-center gap-2">
-                <Users className="w-4 h-4 text-cyan-400" /> Additional Team Members ({members.length}/3)
-              </h4>
+              <div>
+                <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                  <Users className="w-4 h-4 text-cyan-400" /> Additional Team Members ({1 + members.length} Participants Total)
+                </h4>
+                <p className="text-[11px] text-slate-400">Add 1 to 3 additional members (Team size: 2-4 members)</p>
+              </div>
               {members.length < 3 && (
                 <button
+                  type="button"
                   onClick={handleAddMember}
-                  className="text-xs font-bold text-cyan-400 hover:underline"
-                  id="reg-add-member-btn"
+                  className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 border border-cyan-500/40 text-xs font-bold flex items-center gap-1.5 transition-colors"
                 >
-                  + Add Member {members.length + 2}
+                  <Plus className="w-3.5 h-3.5" /> Add Member ({1 + members.length}/4)
                 </button>
               )}
             </div>
 
-            <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+            {/* Validation warnings for duplicates or missing fields */}
+            {hasDuplicateEmail && (
+              <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Duplicate email address detected. Each participant must have a unique email address.</span>
+              </div>
+            )}
+            {hasDuplicateUsn && (
+              <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Duplicate USN detected. Each participant must have a unique roll number / USN.</span>
+              </div>
+            )}
+
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
               {members.map((mem, idx) => (
-                <div key={idx} className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2 relative">
-                  <div className="flex justify-between items-center">
+                <div key={idx} className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2 relative">
+                  <div className="flex justify-between items-center pb-1 border-b border-slate-800">
                     <span className="text-xs font-black text-cyan-400">Member #{idx + 2}</span>
                     {members.length > 1 && (
-                      <button onClick={() => handleRemoveMember(idx)} className="text-red-400 text-xs">Remove</button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMember(idx)}
+                        className="text-rose-400 hover:text-rose-300 p-1 rounded hover:bg-rose-950/40 text-xs flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Remove
+                      </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Full Name"
-                      value={mem.fullName}
-                      onChange={(e) => handleUpdateMember(idx, 'fullName', e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
-                    />
-                    <input
-                      type="text"
-                      placeholder="USN Number"
-                      value={mem.usn}
-                      onChange={(e) => handleUpdateMember(idx, 'usn', e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
-                    />
-                    <input
-                      type="email"
-                      placeholder="Email Address"
-                      value={mem.email}
-                      onChange={(e) => handleUpdateMember(idx, 'email', e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs col-span-2"
-                    />
-                    <input
-                      type="text"
-                      placeholder="College Name"
-                      value={mem.college}
-                      onChange={(e) => handleUpdateMember(idx, 'college', e.target.value)}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs col-span-2"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Full Name *</label>
+                      <input
+                        type="text"
+                        placeholder="Full Name"
+                        required
+                        value={mem.fullName}
+                        onChange={(e) => handleUpdateMember(idx, 'fullName', e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">USN / Roll Number *</label>
+                      <input
+                        type="text"
+                        placeholder="USN Number"
+                        required
+                        value={mem.usn}
+                        onChange={(e) => handleUpdateMember(idx, 'usn', e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Email Address *</label>
+                      <input
+                        type="email"
+                        placeholder="Email Address"
+                        required
+                        value={mem.email}
+                        onChange={(e) => handleUpdateMember(idx, 'email', e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Gender</label>
+                      <select
+                        value={mem.gender}
+                        onChange={(e) => handleUpdateMember(idx, 'gender', e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      >
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">College / Institute Name</label>
+                      <input
+                        type="text"
+                        placeholder="College Name"
+                        value={mem.college}
+                        onChange={(e) => handleUpdateMember(idx, 'college', e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
                   </div>
                 </div>
               ))}
@@ -779,12 +891,12 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
             {/* Live Registration Fee Calculation */}
             <div className="p-3 rounded-xl bg-slate-900 border border-emerald-500/30 flex items-center justify-between">
               <div className="text-xs text-slate-300 font-semibold">
-                Registration Fee
-                <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Auto-calculated</div>
+                Registration Fee ({currentParticipantCount} Participants)
+                <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">₹{currentFeePerParticipant} / participant</div>
               </div>
               <div className="text-right">
                 <div className="text-emerald-400 font-black text-xl">₹{currentTotalFee}</div>
-                <div className="text-[10px] text-slate-400">₹{currentFeePerParticipant} × {currentParticipantCount} participant{currentParticipantCount > 1 ? 's' : ''}</div>
+                <div className="text-[10px] text-slate-400">₹{currentFeePerParticipant} × {currentParticipantCount} participants</div>
               </div>
             </div>
 
@@ -793,11 +905,12 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 Back
               </button>
               <button
+                disabled={!isStep3Valid}
                 onClick={() => setStep(4)}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-xs shadow-lg flex items-center justify-center gap-2"
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-xs shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
                 id="reg-step3-next-btn"
               >
-                <span>Proceed to PhonePe Payment</span>
+                <span>Proceed to PhonePe Payment (₹{currentTotalFee})</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -823,7 +936,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               <div>
                 <PhonePeQRCode
                   upiId="kgsoumya1605@okicici"
-                  amount={String((1 + members.filter(m => m.fullName && m.email).length) * currentFeePerParticipant)}
+                  amount={String(currentTotalFee)}
                   size={190}
                   onPaymentInitiated={() => {
                     handleAutoDetectPayment();
@@ -1117,15 +1230,20 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-300">
                   <div><strong className="text-slate-400">Team Name:</strong> <span className="text-white font-bold">{registeredTeam.teamName}</span></div>
                   <div><strong className="text-slate-400">Track:</strong> <span className="text-purple-300 font-bold">{registeredTeam.preferredTrack}</span></div>
-                  <div><strong className="text-slate-400">Leader:</strong> <span className="text-white">{registeredTeam.members[0]?.fullName}</span> ({registeredTeam.members[0]?.usn})</div>
+                  <div><strong className="text-slate-400">Leader:</strong> <span className="text-white">{registeredTeam.members[0]?.fullName}</span> ({registeredTeam.members[0]?.gender || 'Male'} • {registeredTeam.members[0]?.usn})</div>
                   <div><strong className="text-slate-400">Payment UTR:</strong> <span className="text-emerald-400 font-mono font-bold">{registeredTeam.paymentUtr || paymentUtr}</span></div>
                   <div className="col-span-1 sm:col-span-2"><strong className="text-slate-400">College:</strong> {registeredTeam.members[0]?.college}</div>
                   <div className="col-span-1 sm:col-span-2 pt-1 border-t border-slate-800/80">
-                    <strong className="text-slate-400 block mb-1">Registered Hacker(s):</strong>
+                    <strong className="text-slate-400 block mb-1">Registered Hacker(s) (6 Participants):</strong>
                     <div className="space-y-1">
                       {registeredTeam.members.map((m: any, i: number) => (
-                        <div key={i} className="flex flex-wrap justify-between gap-x-4 gap-y-0.5 text-[11px] bg-slate-950/60 px-2 py-1 rounded-lg">
+                        <div key={i} className="flex flex-wrap justify-between items-center gap-x-4 gap-y-0.5 text-[11px] bg-slate-950/60 px-2.5 py-1.5 rounded-lg border border-slate-800">
                           <span>{i === 0 ? '👑 Leader' : `Member ${i+1}`}: <strong className="text-white">{m.fullName}</strong> ({m.usn})</span>
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                            String(m.gender).toLowerCase() === 'female'
+                              ? 'bg-pink-950/80 text-pink-300 border border-pink-700'
+                              : 'bg-cyan-950/80 text-cyan-300 border border-cyan-700'
+                          }`}>{m.gender || 'Male'}</span>
                           <span className="text-slate-400 font-mono">{m.email}</span>
                           <span className="text-slate-500 w-full sm:w-auto">🏫 {m.college || 'Not specified'}</span>
                         </div>
@@ -1205,13 +1323,13 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
                   {/* Edit Members */}
                   <div className="pt-2 border-t border-slate-800 space-y-2">
-                    <label className="block text-[10px] font-bold text-slate-300 uppercase">Team Members List:</label>
+                    <label className="block text-[10px] font-bold text-slate-300 uppercase">Team Members List (6 Participants):</label>
                     {editSlipForm.members.map((mem: any, idx: number) => (
                       <div key={idx} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
                         <span className="text-[10px] font-bold text-cyan-400">
                           {idx === 0 ? 'Leader / Member 1' : `Member #${idx + 1}`}
                         </span>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-1.5">
                           <input
                             type="text"
                             placeholder="Full Name"
@@ -1245,6 +1363,19 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                             }}
                             className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
                           />
+                          <select
+                            value={mem.gender || 'Male'}
+                            onChange={(e) => {
+                              const updated = [...editSlipForm.members];
+                              updated[idx].gender = e.target.value;
+                              setEditSlipForm({ ...editSlipForm, members: updated });
+                            }}
+                            className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
+                          >
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Other">Other</option>
+                          </select>
                         </div>
                       </div>
                     ))}

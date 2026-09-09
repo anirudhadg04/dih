@@ -10,3 +10,4 @@ coverage/
 backups/*
 !backups/participant-registration-backup.csv
 !backups/.gitkeep
+*.traineddata

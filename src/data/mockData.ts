@@ -349,8 +349,8 @@ export const FAQS: FAQItem[] = [
     category: 'Eligibility'
   },
   {
-    question: 'What is the permitted team size?',
-    answer: 'Teams must consist of 2 to 4 members. Cross-departmental and cross-college teams are strongly encouraged!',
+    question: 'What is the permitted team size and composition?',
+    answer: 'Teams must consist of 2 to 4 members (1 Leader + 1 to 3 Additional Members). Cross-departmental and cross-college teams are strongly encouraged!',
     category: 'Registration'
   },
   {

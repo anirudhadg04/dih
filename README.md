@@ -6,7 +6,7 @@ Anvation is the web platform for **KSSEM Anvation 1.0**, a national-level,
 
 - **Dates:** 8-9 October 2026
 - **Venue:** KSSEM Campus, Bengaluru
-- **Team size:** 2-4 members
+- **Team size:** 2-4 members (1 leader + 1-3 members)
 - **Entry fee:** INR 500 per team
 - **Prize pool:** INR 50,000
 - **Theme:** explore, innovate, transform

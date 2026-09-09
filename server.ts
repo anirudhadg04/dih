@@ -317,12 +317,13 @@ export async function startServer() {
 
   // Forward declaration so rate-limit impls below can read live config.
 
-  // Application-level security headers applied to every HTTP response.
+  // Application-level security headers applied to every HTTP response (OWASP A05).
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "SAMEORIGIN");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
     // SPA assets are self-served; keep default-src permissive so inline
     // scripts/styles used across components keep working, while still
     // blocking obvious third-party script injection.
@@ -331,6 +332,119 @@ export async function startServer() {
     }
     next();
   });
+
+  // OWASP A03 / A08: Prototype Pollution Protection middleware
+  function sanitizeObjectKeys(obj: any): any {
+    if (obj === null || typeof obj !== "object") return obj;
+    if (Array.isArray(obj)) {
+      for (let i = 0; i < obj.length; i++) {
+        obj[i] = sanitizeObjectKeys(obj[i]);
+      }
+      return obj;
+    }
+    for (const key of Object.keys(obj)) {
+      if (key === "__proto__" || key === "constructor" || key === "prototype") {
+        delete obj[key];
+      } else {
+        obj[key] = sanitizeObjectKeys(obj[key]);
+      }
+    }
+    return obj;
+  }
+
+  app.use((req, res, next) => {
+    if (req.body && typeof req.body === "object") sanitizeObjectKeys(req.body);
+    if (req.query && typeof req.query === "object") sanitizeObjectKeys(req.query);
+    if (req.params && typeof req.params === "object") sanitizeObjectKeys(req.params);
+    next();
+  });
+
+  // OWASP A10: Server-Side Request Forgery (SSRF) Protection for external URL fields
+  function isValidSafeUrl(urlString?: string | null): boolean {
+    if (!urlString || typeof urlString !== "string") return true;
+    const trimmed = urlString.trim();
+    if (!trimmed) return true;
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return false;
+      }
+      const hostname = parsed.hostname.toLowerCase();
+      // Block loopback, local, metadata, internal domains
+      if (
+        hostname === "localhost" ||
+        hostname.endsWith(".localhost") ||
+        hostname.endsWith(".local") ||
+        hostname.endsWith(".internal") ||
+        hostname === "127.0.0.1" ||
+        hostname === "0.0.0.0" ||
+        hostname === "::1" ||
+        hostname === "169.254.169.254" ||
+        hostname === "metadata.google.internal"
+      ) {
+        return false;
+      }
+      // Block private RFC 1918 IPv4 ranges
+      const ipMatch = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+      if (ipMatch) {
+        const b0 = parseInt(ipMatch[1], 10);
+        const b1 = parseInt(ipMatch[2], 10);
+        if (b0 === 10) return false;
+        if (b0 === 172 && b1 >= 16 && b1 <= 31) return false;
+        if (b0 === 192 && b1 === 168) return false;
+        if (b0 === 127 || b0 === 0) return false;
+        if (b0 === 169 && b1 === 254) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // OWASP A03: Input string sanitization to mitigate script injection
+  function sanitizeInputString(str: any): string {
+    if (typeof str !== "string") return "";
+    return str
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+      .replace(/javascript:/gi, "")
+      .trim();
+  }
+
+  // OWASP A04 / A07: Brute Force Login Protection & Account Lockout Tracker
+  const failedLoginAttempts = new Map<string, { count: number; lockedUntil: number }>();
+
+  function checkLoginRate(identifier: string, ip: string): { locked: boolean; waitSeconds?: number } {
+    const now = Date.now();
+    const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
+    for (const k of keys) {
+      const record = failedLoginAttempts.get(k);
+      if (record && record.lockedUntil > now) {
+        const waitSeconds = Math.ceil((record.lockedUntil - now) / 1000);
+        return { locked: true, waitSeconds };
+      }
+    }
+    return { locked: false };
+  }
+
+  function recordLoginFailure(identifier: string, ip: string): void {
+    const now = Date.now();
+    const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
+    for (const k of keys) {
+      const record = failedLoginAttempts.get(k) || { count: 0, lockedUntil: 0 };
+      record.count += 1;
+      if (record.count >= 5) {
+        record.lockedUntil = now + (5 * 60 * 1000); // 5-minute lockout after 5 failed attempts
+      }
+      failedLoginAttempts.set(k, record);
+    }
+  }
+
+  function clearLoginFailure(identifier: string, ip: string): void {
+    const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
+    for (const k of keys) {
+      failedLoginAttempts.delete(k);
+    }
+  }
 
   const AUTH_COOKIE = "anvation_session";
   const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -604,8 +718,8 @@ export async function startServer() {
 
   const csvCell = (value: unknown): string => {
     let text = value === null || value === undefined ? "" : String(value);
-    // Avoid CSV/formula injection when this file is opened in Excel or Sheets.
-    if (/^\s*[=+\-@]/.test(text)) text = `'${text}`;
+    // OWASP A03: Avoid CSV/formula injection when this file is opened in Excel or Sheets.
+    if (/^[\s\t\r\n]*[=+\-@\t\r]/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;
   };
 
@@ -861,8 +975,17 @@ export async function startServer() {
         return res.status(400).json({ success: false, error: "Team credentials are required." });
       }
 
+      const ip = getClientIp(req);
       const cleanId = String(identifier).trim().toLowerCase();
       const cleanPass = String(password).trim();
+
+      const rateCheck = checkLoginRate(cleanId, ip);
+      if (rateCheck.locked) {
+        return res.status(429).json({
+          success: false,
+          error: `Too many failed login attempts. Temporarily locked. Please try again in ${rateCheck.waitSeconds} seconds.`
+        });
+      }
 
       const team = teams.find(t => 
         t.id.toLowerCase() === cleanId ||
@@ -877,6 +1000,7 @@ export async function startServer() {
       );
 
       if (!team) {
+        recordLoginFailure(cleanId, ip);
         return res.status(401).json({ success: false, error: "Invalid credentials." });
       }
 
@@ -884,8 +1008,11 @@ export async function startServer() {
       const passMatches = verifyPassword(cleanPass, storedHash);
 
       if (!passMatches) {
+        recordLoginFailure(cleanId, ip);
         return res.status(401).json({ success: false, error: "Invalid credentials." });
       }
+
+      clearLoginFailure(cleanId, ip);
 
       const sid = createSession({
         id: team.id,
@@ -918,12 +1045,74 @@ export async function startServer() {
       }
 
       const { teamName, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentAmount, paymentScreenshot } = req.body;
-      if (!teamName || !leader?.fullName || !leader?.email) {
-        return res.status(400).json({ success: false, error: "Missing required registration fields" });
+      
+      // 1. Team Name Validation
+      if (!teamName || !String(teamName).trim()) {
+        return res.status(400).json({ success: false, error: "Team name is required." });
       }
 
-      // Payment screenshot is MANDATORY — a team must never be registered (and
-      // its payment recorded) without proof of the successful PhonePe transaction.
+      // 2. Leader Validation
+      if (!leader || !leader.fullName?.trim() || !leader.email?.trim() || !leader.usn?.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: "Team leader details are incomplete. Full Name, Email, and USN are strictly required."
+        });
+      }
+
+      // 3. Team Size Validation (1 leader + 1 to 3 additional members = 2 to 4 participants total)
+      if (!Array.isArray(members) || members.length < 1 || members.length > 3) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid team size: Teams must have between 2 and 4 participants (1 leader + 1 to 3 additional members). Received ${1 + (Array.isArray(members) ? members.length : 0)} participant(s).`
+        });
+      }
+
+      // 4. Validate Each Additional Member
+      for (let i = 0; i < members.length; i++) {
+        const m = members[i];
+        if (!m || !m.fullName?.trim() || !m.email?.trim() || !m.usn?.trim()) {
+          return res.status(400).json({
+            success: false,
+            error: `Member #${i + 2} details are incomplete. Full Name, Email, and USN are required for every team member.`
+          });
+        }
+      }
+
+      // 5. Uniqueness Validation (No duplicate emails or USNs across participants)
+      const allParticipantsList = [leader, ...members];
+      const seenEmails = new Set<string>();
+      const seenUsns = new Set<string>();
+      for (const p of allParticipantsList) {
+        const cleanEmail = p.email.trim().toLowerCase();
+        const cleanUsn = p.usn.trim().toUpperCase();
+        if (seenEmails.has(cleanEmail)) {
+          return res.status(400).json({
+            success: false,
+            error: `Duplicate email detected: "${p.email}". Each participant in the team must have a unique email address.`
+          });
+        }
+        seenEmails.add(cleanEmail);
+        if (seenUsns.has(cleanUsn)) {
+          return res.status(400).json({
+            success: false,
+            error: `Duplicate USN detected: "${p.usn}". Each participant in the team must have a unique USN / roll number.`
+          });
+        }
+        seenUsns.add(cleanUsn);
+      }
+
+      // 6. Payment Verification & Amount Validation (Dynamic: total participants * feePerParticipant)
+      const participantCount = 1 + members.length;
+      const feePerParticipant = Number(cmsConfig.registrationFee || 1);
+      const expectedTotalFee = participantCount * feePerParticipant;
+      if (paymentAmount !== undefined && Number(paymentAmount) !== expectedTotalFee) {
+        return res.status(400).json({
+          success: false,
+          error: `Payment amount mismatch: Expected ₹${expectedTotalFee} for ${participantCount} participants (₹${feePerParticipant} × ${participantCount}), but received ₹${paymentAmount}.`
+        });
+      }
+
+      // 7. Payment screenshot is MANDATORY — a team must never be registered without proof.
       if (!paymentScreenshot || String(paymentScreenshot).trim() === '') {
         return res.status(400).json({
           success: false,
@@ -937,40 +1126,40 @@ export async function startServer() {
 
       const leaderParticipant: Participant = {
         id: `p-${teamIndex}-1`,
-        fullName: leader.fullName,
-        college: leader.college || 'KS School of Engineering & Management',
-        department: leader.department || 'Computer Science & Engineering',
-        semester: leader.semester || '6th Semester',
-        email: leader.email,
-        phone: leader.phone || '',
-        usn: leader.usn || `1KG23CS${Math.floor(10 + Math.random() * 89)}`,
-        gender: leader.gender || 'Male',
-        githubUrl: leader.githubUrl,
-        linkedinUrl: leader.linkedinUrl,
+        fullName: sanitizeInputString(leader.fullName),
+        college: sanitizeInputString(leader.college || 'KS School of Engineering & Management'),
+        department: sanitizeInputString(leader.department || 'Computer Science & Engineering'),
+        semester: sanitizeInputString(leader.semester || '6th Semester'),
+        email: sanitizeInputString(leader.email),
+        phone: sanitizeInputString(leader.phone || ''),
+        usn: sanitizeInputString(leader.usn),
+        gender: sanitizeInputString(leader.gender || 'Male'),
+        githubUrl: sanitizeInputString(leader.githubUrl),
+        linkedinUrl: sanitizeInputString(leader.linkedinUrl),
         role: 'Leader',
         teamId,
         accommodationRequired: !!accommodationRequired,
-        emergencyContact: leader.emergencyContact || leader.phone || '',
+        emergencyContact: sanitizeInputString(leader.emergencyContact || leader.phone || ''),
         checkedIn: false,
         foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
       };
 
       const formattedMembers: Participant[] = members.map((m: any, idx: number) => ({
         id: `p-${teamIndex}-${idx + 2}`,
-        fullName: m.fullName,
-        college: m.college || leader.college || 'KSSEM',
-        department: m.department || 'CSE',
-        semester: m.semester || '6th Semester',
-        email: m.email,
-        phone: m.phone || '',
-        usn: m.usn || `1KG23CS${Math.floor(10 + Math.random() * 89)}`,
-        gender: m.gender || 'Male',
-        githubUrl: m.githubUrl,
-        linkedinUrl: m.linkedinUrl,
+        fullName: sanitizeInputString(m.fullName),
+        college: sanitizeInputString(m.college || leader.college || 'KSSEM'),
+        department: sanitizeInputString(m.department || 'CSE'),
+        semester: sanitizeInputString(m.semester || '6th Semester'),
+        email: sanitizeInputString(m.email),
+        phone: sanitizeInputString(m.phone || ''),
+        usn: sanitizeInputString(m.usn),
+        gender: sanitizeInputString(m.gender || 'Male'),
+        githubUrl: sanitizeInputString(m.githubUrl),
+        linkedinUrl: sanitizeInputString(m.linkedinUrl),
         role: 'Member',
         teamId,
         accommodationRequired: !!accommodationRequired,
-        emergencyContact: m.emergencyContact || leader.phone || '',
+        emergencyContact: sanitizeInputString(m.emergencyContact || leader.phone || ''),
         checkedIn: false,
         foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
       }));
@@ -980,15 +1169,15 @@ export async function startServer() {
       const newTeam: Team = {
         id: teamId,
         regNumber,
-        teamName,
-        leaderEmail: leader.email,
+        teamName: sanitizeInputString(teamName),
+        leaderEmail: sanitizeInputString(leader.email),
         accessPassword: hashPassword(accessPassword),
-        preferredTrack: preferredTrack || 'Artificial Intelligence & Machine Learning',
+        preferredTrack: sanitizeInputString(preferredTrack || 'Artificial Intelligence & Machine Learning'),
         members: [leaderParticipant, ...formattedMembers],
         status: 'Confirmed',
         createdAt: new Date().toISOString(),
         projectSubmitted: false,
-        paymentUtr: paymentUtr || 'PENDING',
+        paymentUtr: sanitizeInputString(paymentUtr || 'PENDING'),
         paymentStatus: 'Verified',
         paymentScreenshot: paymentScreenshot || null
       };
@@ -1035,7 +1224,7 @@ export async function startServer() {
           recipientName: member.name,
           role: member.role,
           teamId,
-          teamName,
+          teamName: newTeam.teamName,
           track: preferredTrack || 'AI / ML',
           accessPassword,
           regNumber,
@@ -1058,7 +1247,7 @@ export async function startServer() {
       res.json({
         success: true,
         team: registrationTeam,
-        paymentAmount: Number(paymentAmount) || newTeam.members.length * Number(cmsConfig.registrationFee || 1),
+        paymentAmount: expectedTotalFee,
         emailDispatched: true,
         emailRecipients: allTeamEmails.map(e => e.email),
         emailRecords,
@@ -1079,7 +1268,8 @@ export async function startServer() {
   app.post("/api/verify-payment", async (req, res) => {
     try {
       const { utr, amount, paymentScreenshot } = req.body;
-      const expectedAmount = Number(amount) || cmsConfig.registrationFee;
+      const feePerHead = Number(cmsConfig.registrationFee || 1);
+      const expectedAmount = Number(amount) || (2 * feePerHead);
       const cleanUtr = (utr ? String(utr).trim().toUpperCase() : '');
       const validUtrPattern = /^[A-Z0-9]{12,22}$/i;
       const screenshotMatch = typeof paymentScreenshot === 'string'
@@ -1465,6 +1655,20 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       const { teamId, projectTitle, problemStatement, technologyStack, architectureOverview, githubLink, demoVideoUrl, pptUrl, pdfDocUrl, futureScope, track } = req.body;
       if (!teamId || !projectTitle || !githubLink) {
         return res.status(400).json({ success: false, error: "Missing required submission fields" });
+      }
+
+      // OWASP A10: Validate external URLs against SSRF / malicious loopback
+      if (githubLink && !isValidSafeUrl(githubLink)) {
+        return res.status(400).json({ success: false, error: "Invalid or unsafe GitHub URL provided." });
+      }
+      if (demoVideoUrl && !isValidSafeUrl(demoVideoUrl)) {
+        return res.status(400).json({ success: false, error: "Invalid or unsafe Demo Video URL provided." });
+      }
+      if (pptUrl && !isValidSafeUrl(pptUrl)) {
+        return res.status(400).json({ success: false, error: "Invalid or unsafe Presentation URL provided." });
+      }
+      if (pdfDocUrl && !isValidSafeUrl(pdfDocUrl)) {
+        return res.status(400).json({ success: false, error: "Invalid or unsafe PDF Document URL provided." });
       }
 
       if (req.session?.teamId && teamId && String(teamId).toLowerCase() !== String(req.session.teamId).toLowerCase()) {
@@ -1877,19 +2081,32 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       return res.status(400).json({ success: false, error: "Username and password are required." });
     }
 
+    const ip = getClientIp(req);
+    const rateCheck = checkLoginRate(idn, ip);
+    if (rateCheck.locked) {
+      return res.status(429).json({
+        success: false,
+        error: `Too many failed login attempts. Temporarily locked. Please try again in ${rateCheck.waitSeconds} seconds.`
+      });
+    }
+
     const user = adminUsers.find(
       u => (u.username || '').toLowerCase() === idn || (u.email || '').toLowerCase() === idn
     );
 
     if (!user) {
+      recordLoginFailure(idn, ip);
       return res.status(401).json({ success: false, error: "Invalid credentials." });
     }
     if (user.status !== 'Active') {
       return res.status(403).json({ success: false, error: "This account has been suspended." });
     }
     if (!verifyPassword(pass, user.password)) {
+      recordLoginFailure(idn, ip);
       return res.status(401).json({ success: false, error: "Invalid credentials." });
     }
+
+    clearLoginFailure(idn, ip);
 
     user.lastLogin = new Date().toISOString();
     const sid = createSession({
@@ -2686,6 +2903,19 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       certificates: !!cmsConfig.enableCertificateDownloads,
       submissions: !!cmsConfig.enableProjectSubmissions,
       support: !!cmsConfig.enableSupportTickets
+    });
+  });
+
+  // OWASP A05: Global Safe Error Handling Middleware
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("[SERVER ERROR]", err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    const statusCode = typeof err?.status === "number" ? err.status : (typeof err?.statusCode === "number" ? err.statusCode : 500);
+    res.status(statusCode).json({
+      success: false,
+      error: "An internal server error occurred. Please try again later."
     });
   });
 
