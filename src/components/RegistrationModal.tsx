@@ -44,14 +44,13 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   } | null>(null);
   const [qrReady, setQrReady] = useState(false);
 
-  // Payment proof screenshot upload — previewed on-screen and persisted to the
-  // team's paymentScreenshot (base64 data URL) via /api/register.
-  const [paymentScreenshotData, setPaymentScreenshotData] = useState<string | null>(null);
-  const [paymentScreenshotName, setPaymentScreenshotName] = useState<string>('');
+  // Payment UTR Confirmation State (Double-Entry Verification)
+  const [paymentUtr, setPaymentUtr] = useState('');
+  const [paymentUtrConfirm, setPaymentUtrConfirm] = useState('');
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  // Guards against duplicate submissions (double-click or payment auto-fire)
-  // so two concurrent/clustered registrations never create the same team twice.
+  // Guards against duplicate submissions (double-click)
   const submittingRef = useRef(false);
   const verifyingRef = useRef(false);
 
@@ -59,8 +58,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   const [teamName, setTeamName] = useState('');
   const [preferredTrack, setPreferredTrack] = useState(HACKATHON_TRACKS[0].title);
   const [accommodationRequired, setAccommodationRequired] = useState(true);
-  const [paymentUtr, setPaymentUtr] = useState('');
-  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
 
   // Leader State (Member 1)
   const [leader, setLeader] = useState({
@@ -82,9 +79,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     { fullName: '', email: '', phone: '', usn: '', college: '' }
   ]);
 
-  // Fresh start every time the modal is opened. Clears any previously shown
-  // registration slip (and leftover form data) so it never reappears when the
-  // modal is reopened for a new registration.
+  // Fresh start every time the modal is opened.
   const resetForm = () => {
     submittingRef.current = false;
     verifyingRef.current = false;
@@ -106,8 +101,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     setPreferredTrack(HACKATHON_TRACKS[0].title);
     setAccommodationRequired(true);
     setPaymentUtr('');
-    setPaymentScreenshotData(null);
-    setPaymentScreenshotName('');
+    setPaymentUtrConfirm('');
     setLeader({
       fullName: '',
       college: '',
@@ -172,223 +166,113 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     setMembers(updated);
   };
 
-  // Read an uploaded payment screenshot as a base64 data URL, validate it is an
-  // image, and preview it so the participant can confirm before submitting.
-  const handlePaymentScreenshotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      alert('Please upload an image file (JPG, PNG, etc.) as payment proof.');
-      return;
-    }
-    const maxBytes = 8 * 1024 * 1024; // 8 MB safety cap for the base64 payload
-    if (file.size > maxBytes) {
-      alert('Screenshot too large. Please upload an image under 8 MB.');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPaymentScreenshotData(String(reader.result));
-      setPaymentScreenshotName(file.name);
-    };
-    reader.onerror = () => alert('Could not read the file. Please try again.');
-    reader.readAsDataURL(file);
-  };
+  const currentFeePerParticipant = 1;
+  const activeMembers = members.filter(m => m.fullName && m.email);
+  const participantCount = 1 + activeMembers.length;
+  const currentTotalFee = participantCount * currentFeePerParticipant;
 
-  const handleSubmitRegistration = async (confirmedUtr?: string) => {
-    // Double-submission lock: prevents rapid double-clicks or the 500ms
-    // payment auto-fire from registering the same team twice concurrently.
-    if (submittingRef.current) return;
+  const handleSubmitRegistration = async () => {
+    // Double-submission lock: prevents rapid double-clicks
+    if (submittingRef.current || loading) return;
+
+    const utr1 = paymentUtr.trim();
+    const utr2 = paymentUtrConfirm.trim();
+
+    if (!utr1 || !utr2) {
+      setPaymentFailError("Please enter your UPI Transaction ID (UTR) twice to confirm payment.");
+      setShowPaymentFailModal(true);
+      return;
+    }
+
+    if (utr1.includes('@') || utr2.includes('@') || utr1.includes(' ') || utr2.includes(' ') || utr1.includes('\t') || utr2.includes('\t')) {
+      setPaymentFailError("Invalid UTR format. Enter the transaction reference ID, not a UPI handle (e.g. name@bank) or email address.");
+      setShowPaymentFailModal(true);
+      return;
+    }
+
+    const utrPattern = /^[A-Za-z0-9]{12,22}$/;
+    if (!utrPattern.test(utr1) || !utrPattern.test(utr2)) {
+      setPaymentFailError("Invalid UTR format. The transaction ID must be 12 to 22 alphanumeric characters.");
+      setShowPaymentFailModal(true);
+      return;
+    }
+
+    if (utr1.toUpperCase() !== utr2.toUpperCase()) {
+      setPaymentFailError("The two UPI Transaction IDs do not match. Please verify your transaction receipt and re-enter.");
+      setShowPaymentFailModal(true);
+      return;
+    }
+
+    if (participantCount < 2 || participantCount > 4) {
+      alert("A team must have between 2 and 4 participants (1 Leader + 1 to 3 Members). Please adjust team members in Step 3.");
+      setStep(3);
+      return;
+    }
+
     submittingRef.current = true;
     setLoading(true);
+    setPaymentVerifying(true);
+    setPaymentFailError(null);
+
     try {
-      // UTR is mandatory — registration must never proceed without a real,
-      // verified payment transaction reference.
-      const finalUtr = (confirmedUtr || paymentUtr || '').trim();
-      if (finalUtr.length < 12) {
-        submittingRef.current = false;
-        setLoading(false);
-        setPaymentVerifying(false);
-        setPaymentFailError("Payment is required. Please complete the registration fee payment and enter your UTR before registering.");
-        setShowPaymentFailModal(true);
-        return;
-      }
-      // Screenshot is MANDATORY — registration (which records/takes the payment)
-      // must never proceed without an uploaded payment screenshot for the admin
-      // desk to verify against.
-      if (!paymentScreenshotData) {
-        submittingRef.current = false;
-        setLoading(false);
-        setPaymentVerifying(false);
-        setPaymentFailError("Payment screenshot is required. Please upload a screenshot of your successful PhonePe transaction before registering.");
-        setShowPaymentFailModal(true);
-        return;
-      }
-      const activeMembers = members.filter(m => m.fullName && m.email);
-      const participantCount = 1 + activeMembers.length;
-      const totalFee = participantCount * currentFeePerParticipant;
+      const idempotencyKey = `reg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const res = await fetch('/api/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey
+        },
         body: JSON.stringify({
           teamName: teamName || 'Anvation Innovators',
           preferredTrack,
           accommodationRequired,
           leader,
-            members: activeMembers,
-            paymentUtr: finalUtr,
-            paymentAmount: totalFee,
-            paymentScreenshot: paymentScreenshotData || null
+          members: activeMembers,
+          paymentUtr: utr1.toUpperCase(),
+          paymentUtrConfirm: utr2.toUpperCase()
         })
       });
 
       const data = await res.json();
-      if (data.success && data.team) {
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Registration failed. Please check your details and retry.");
+      }
+
+      if (data.team) {
         setRegisteredTeam(data.team);
         onSuccess(data.team);
+        setPaymentConfirmed(true);
+        setPaymentVerifiedSuccess(true);
 
-        // Gather all participant emails
         const allEmails = [
           leader.email,
           ...activeMembers.map(m => m.email).filter(Boolean)
         ];
         setDispatchedRecipients(data.emailRecipients || allEmails);
 
-        // Direct Email Notification Dispatch to all participant emails (fully
-        // local — generates a downloadable .eml, no external API).
-        try {
-          const emailRes = await fetch('/api/send-registration-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              teamId: data.team.id,
-              emails: allEmails,
-              teamName: data.team.teamName,
-              track: data.team.preferredTrack,
-              password: data.team.accessPassword,
-              regNumber: data.team.regNumber,
-              participants: [
-                { email: leader.email, name: leader.fullName, college: leader.college, role: 'Leader' },
-                ...activeMembers.map(m => ({ email: m.email, name: m.fullName, college: m.college, role: 'Member' }))
-              ].filter(p => p.email)
-            })
-          });
-          const emailData = await emailRes.json();
-          // Record the real delivery outcome so the success screen can show
-          // truthfully whether emails were actually sent (SMTP OK) or not.
+        if (data.delivery) {
           setEmailDispatchInfo({
-            delivered: Number(emailData.deliveredCount) || 0,
-            failed: Number(emailData.failedCount) || 0,
-            smtpConfigured: emailData.smtpConfigured === true,
-            transport: emailData.transport,
-            message: emailData.gatewayMessage || emailData.message,
-            error: emailData.smtpError || emailData.error
+            delivered: Number(data.delivery.deliveredCount) || 0,
+            failed: Number(data.delivery.failedCount) || 0,
+            smtpConfigured: data.delivery.smtpConfigured === true,
+            transport: data.delivery.transport,
+            message: data.delivery.message || (data.delivery.status === 'queued' ? 'Credential delivery queued for dispatch to participant inboxes.' : undefined),
+            error: data.delivery.error
           });
-          if (emailData.success && emailData.eml) {
-            const emailsReady = allEmails.map(recipient => ({ recipient, eml: emailData.eml }));
-            setConfirmationEmails(emailsReady);
-            if (emailData.emailRecipients) {
-              setDispatchedRecipients(emailData.emailRecipients.map((r: any) => r.recipient));
-            }
-          }
-        } catch (mailErr) {
-          console.error("Email generation warning:", mailErr);
         }
 
         setStep(5); // Go straight to confirmation slip!
         confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Registration failed:', err);
+      setPaymentFailError(err.message || 'An unexpected error occurred during registration.');
+      setShowPaymentFailModal(true);
     } finally {
       setLoading(false);
       setPaymentVerifying(false);
       submittingRef.current = false;
-      verifyingRef.current = false;
     }
-  };
-
-  // Payment Verification Handler with Automatic Progression directly to Completed Slip
-  const handleVerifyPayment = async (customUtr?: string) => {
-    if (verifyingRef.current || submittingRef.current) return;
-
-    // Payment screenshot is MANDATORY. Verification — and therefore the actual
-    // payment being taken / marked verified — must not happen without proof of
-    // the successful PhonePe transaction being uploaded first.
-    if (!paymentScreenshotData) {
-      setPaymentVerifying(false);
-      setPaymentFailError("Payment screenshot is required. Please upload a screenshot of your successful PhonePe transaction before verifying your payment.");
-      setShowPaymentFailModal(true);
-      return;
-    }
-
-    const utrToVerify = (customUtr || paymentUtr || '').trim();
-    const totalFee = (1 + members.filter(m => m.fullName && m.email).length) * currentFeePerParticipant;
-    const validUtrPattern = /^[A-Z0-9]{12,22}$/i;
-
-    if (!utrToVerify || !validUtrPattern.test(utrToVerify)) {
-      setPaymentVerifying(false);
-      setPaymentFailError("Enter the actual 12+ digit phonepe/UPI transaction reference from your payment receipt (letters/numbers only).");
-      setShowPaymentFailModal(true);
-      return;
-    }
-
-    verifyingRef.current = true;
-    setPaymentVerifying(true);
-    setPaymentFailError(null);
-
-    try {
-      const res = await fetch('/api/verify-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          utr: utrToVerify,
-          amount: String(totalFee),
-          paymentScreenshot: paymentScreenshotData
-        })
-      });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        throw new Error(data?.error || `Payment verification service returned HTTP ${res.status}.`);
-      }
-
-      if (data.success && data.verified) {
-        const verifiedUtr = data.utr || utrToVerify;
-        setPaymentUtr(verifiedUtr);
-        setPaymentVerifiedSuccess(true);
-        setPaymentConfirmed(true);
-        
-        // Auto-finalize team registration only AFTER successful payment verification.
-        setTimeout(() => {
-          handleSubmitRegistration(verifiedUtr);
-        }, 500);
-      } else {
-        setPaymentFailError(data.error || "Payment verification failed: Transaction reference not found on UPI settlement network.");
-        setShowPaymentFailModal(true);
-        setPaymentVerifiedSuccess(false);
-        setPaymentVerifying(false);
-        verifyingRef.current = false;
-      }
-    } catch (err: any) {
-      const message = err instanceof Error ? err.message : '';
-      const isNetworkFailure = err instanceof TypeError || !message;
-      setPaymentFailError(
-        isNetworkFailure
-          ? "Payment verification service is unreachable. Please check your connection and retry. Your UTR and screenshot are still in this form."
-          : `Payment verification failed: ${message}`
-      );
-      setShowPaymentFailModal(true);
-      setPaymentVerifying(false);
-      verifyingRef.current = false;
-    }
-  };
-
-  // "I HAVE PAID" — same strict verification as above. It never fabricates a UTR:
-  // the participant must have entered a real UTR.
-  const handleAutoDetectPayment = () => {
-    handleVerifyPayment(paymentUtr);
   };
 
   const handleStartEditSlip = () => {
@@ -512,10 +396,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       alert('Could not generate the Gate Pass image. Show your Team ID at the gate (' + registeredTeam.id + ').');
     }
   };
-
-  const currentFeePerParticipant = 1;
-  const currentParticipantCount = 1 + members.filter(m => m.fullName && m.email).length;
-  const currentTotalFee = currentParticipantCount * currentFeePerParticipant;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
@@ -784,7 +664,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               </div>
               <div className="text-right">
                 <div className="text-emerald-400 font-black text-xl">₹{currentTotalFee}</div>
-                <div className="text-[10px] text-slate-400">₹{currentFeePerParticipant} × {currentParticipantCount} participant{currentParticipantCount > 1 ? 's' : ''}</div>
+                <div className="text-[10px] text-slate-400">₹{currentFeePerParticipant} × {participantCount} participant{participantCount > 1 ? 's' : ''}</div>
               </div>
             </div>
 
@@ -825,113 +705,76 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                   upiId="kgsoumya1605@okicici"
                   amount={String((1 + members.filter(m => m.fullName && m.email).length) * currentFeePerParticipant)}
                   size={190}
-                  onPaymentInitiated={() => {
-                    handleAutoDetectPayment();
-                  }}
                 />
               </div>
 
               {/* UTR Input Form & Instant Verification */}
               <div className="space-y-3 bg-slate-900/90 p-4 rounded-2xl border border-indigo-500/30">
-                {/* PRIMARY ONE-CLICK AUTO-DETECT BUTTON */}
-                <button
-                  type="button"
-                  disabled={paymentVerifying || paymentVerifiedSuccess}
-                  onClick={() => handleAutoDetectPayment()}
-                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-xs sm:text-sm shadow-[0_0_20px_rgba(16,185,129,0.4)] flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
-                  id="auto-detect-paid-btn"
-                >
-                  <Sparkles className="w-4 h-4 text-slate-950 animate-spin" />
-                  <span>I HAVE PAID ₹{currentTotalFee} — VERIFY & NEXT STEP</span>
-                  <ArrowRight className="w-4 h-4 text-slate-950" />
-                </button>
-
-                {/* Status Indicator Banner */}
-                {paymentVerifying && (
-                  <div className="p-3 rounded-xl bg-indigo-950 border border-indigo-500 text-indigo-200 text-xs flex items-center gap-2 animate-pulse">
-                    <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
-                    <span className="font-bold">Checking the UTR and uploaded payment proof...</span>
-                  </div>
-                )}
-
-                {paymentVerifiedSuccess && (
-                  <div className="p-3 rounded-xl bg-emerald-950 border border-emerald-500 text-emerald-300 text-xs flex items-center gap-2 animate-fadeIn shadow-lg">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                    <span className="font-bold">✓ UTR and payment proof accepted! Proceeding to registration...</span>
-                  </div>
-                )}
-
                 <div className="p-2.5 rounded-xl bg-indigo-950/60 border border-indigo-500/20 text-xs text-slate-300 space-y-1">
                   <div className="font-bold text-white">Beneficiary: <span className="text-indigo-400">KSSEM Anvation 2026 Desk</span></div>
                   <div>UPI ID: <span className="font-mono text-indigo-300">kgsoumya1605@okicici</span></div>
-                  <div>Registration Fee: <span className="text-emerald-400 font-bold">₹{currentFeePerParticipant} per participant · ₹{currentTotalFee} total</span></div>
+                  <div>Registration Fee: <span className="text-emerald-400 font-bold">₹{currentFeePerParticipant} per participant · ₹{currentTotalFee} total ({participantCount} participants)</span></div>
                 </div>
 
+                {/* Transaction ID Field 1 */}
                 <div className="space-y-1 pt-1">
-                  <label className="text-xs font-bold text-slate-300 block">
-                    Or Enter 12-Digit PhonePe / UPI UTR Transaction Reference:
+                  <label className="text-xs font-bold text-slate-200 block">
+                    UPI Transaction ID / UTR <span className="text-red-400 font-black">*</span>
                   </label>
                   <input
                     type="text"
                     maxLength={22}
                     value={paymentUtr}
                     onChange={(e) => {
-                      const val = e.target.value;
+                      const val = e.target.value.trim();
                       setPaymentUtr(val);
                       if (paymentVerifiedSuccess) setPaymentVerifiedSuccess(false);
                       if (paymentConfirmed) setPaymentConfirmed(false);
                     }}
                     placeholder="e.g. 434511786564 or UPI1234567890"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono text-sm tracking-wider focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono text-sm tracking-wider focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                     id="reg-payment-utr-input"
                   />
-                  <p className="text-[10px] text-slate-400">
-                    Complete the ₹{currentTotalFee} payment (₹{currentFeePerParticipant} per participant), then enter the actual PhonePe/UPI transaction reference number and upload the payment screenshot for admin verification.
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Enter the transaction ID/reference number shown in your successful UPI payment confirmation. Do not enter the UPI ID such as <code className="text-indigo-300">name@bank</code> or an email address.
                   </p>
                 </div>
 
-                {/* Payment Proof Screenshot Upload */}
-                <div className="space-y-1.5 pt-1 border-t border-indigo-800/40">
-                  <label className="text-xs font-bold text-slate-300 block">
-                    Upload Payment Screenshot <span className="text-red-400 font-black">(Required)</span>:
+                {/* Transaction ID Field 2 (Confirm) */}
+                <div className="space-y-1 pt-1">
+                  <label className="text-xs font-bold text-slate-200 block">
+                    Confirm UPI Transaction ID / UTR <span className="text-red-400 font-black">*</span>
                   </label>
                   <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handlePaymentScreenshotUpload}
-                    className="w-full text-xs file:text-indigo-300 file:bg-indigo-950/40 file:border file:border-indigo-500/40 file:rounded-lg"
-                    id="reg-payment-screenshot-input"
+                    type="text"
+                    maxLength={22}
+                    value={paymentUtrConfirm}
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      setPaymentUtrConfirm(val);
+                      if (paymentVerifiedSuccess) setPaymentVerifiedSuccess(false);
+                      if (paymentConfirmed) setPaymentConfirmed(false);
+                    }}
+                    placeholder="Re-enter exact UPI Transaction ID / UTR"
+                    className={`w-full px-3 py-2.5 rounded-xl bg-slate-950 border text-white font-mono text-sm tracking-wider focus:ring-1 ${
+                      paymentUtr && paymentUtrConfirm && paymentUtr.toUpperCase() !== paymentUtrConfirm.toUpperCase()
+                        ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                        : paymentUtr && paymentUtrConfirm && paymentUtr.toUpperCase() === paymentUtrConfirm.toUpperCase()
+                        ? 'border-emerald-500 focus:border-emerald-500 focus:ring-emerald-500'
+                        : 'border-slate-700 focus:border-indigo-500 focus:ring-indigo-500'
+                    }`}
+                    id="reg-payment-utr-confirm-input"
                   />
-                  {paymentScreenshotData ? (
-                    <div className="rounded-xl border border-emerald-500/50 bg-slate-950 overflow-hidden">
-                      <div className="flex items-center justify-between px-2 py-1 bg-emerald-950/40 border-t border-emerald-700/40">
-                        <span className="text-[10px] font-bold text-emerald-300 truncate flex-1">✓ {paymentScreenshotName || 'Payment screenshot attached'}</span>
-                        <button
-                          type="button"
-                          onClick={() => { setPaymentScreenshotData(null); setPaymentScreenshotName(''); }}
-                          className="text-red-400 text-[10px] font-bold hover:text-red-300"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                      <img src={paymentScreenshotData} alt="Payment Proof" className="w-full max-h-40 object-contain rounded-b-lg" />
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-slate-400">The screenshot will be stored with your registration and shown to the admin desk as payment proof.</p>
+                  {paymentUtr && paymentUtrConfirm && paymentUtr.toUpperCase() !== paymentUtrConfirm.toUpperCase() && (
+                    <p className="text-[10px] text-red-400 font-semibold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 inline" /> Transaction IDs do not match. Please verify and enter identical values.
+                    </p>
                   )}
-                </div>
-
-                <div className="flex flex-col gap-2 pt-1">
-                  <button
-                    type="button"
-                    disabled={paymentVerifying || paymentConfirmed}
-                    onClick={() => handleVerifyPayment()}
-                    className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-                    id="verify-pay-btn"
-                  >
-                    <Check className="w-4 h-4 text-emerald-400" />
-                    <span>{paymentConfirmed ? "Payment Verified ✓" : "Verify UTR & Continue"}</span>
-                  </button>
+                  {paymentUtr && paymentUtrConfirm && paymentUtr.toUpperCase() === paymentUtrConfirm.toUpperCase() && (
+                    <p className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 inline" /> Transaction IDs match.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -941,17 +784,15 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 Back
               </button>
               <button
-                disabled={paymentVerifying || loading}
-                onClick={() => {
-                  handleAutoDetectPayment();
-                }}
-                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-600 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-slate-950 font-black text-xs sm:text-sm shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+                disabled={loading || !paymentUtr || !paymentUtrConfirm || paymentUtr.toUpperCase() !== paymentUtrConfirm.toUpperCase()}
+                onClick={() => handleSubmitRegistration()}
+                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-600 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-slate-950 font-black text-xs sm:text-sm shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
                 id="reg-step4-next-btn"
               >
-                {loading || paymentVerifying ? (
+                {loading ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
-                    <span>Verifying Payment & Finalizing Registration...</span>
+                    <span>Finalizing Registration & Persisting Backup...</span>
                   </>
                 ) : (
                   <>

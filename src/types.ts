@@ -39,8 +39,9 @@ export interface Team {
   createdAt: string;
   projectSubmitted?: boolean;
   paymentUtr?: string;
-  paymentStatus?: 'Pending' | 'Verified';
-  paymentScreenshot?: string | null;
+  paymentStatus?: 'Pending' | 'Verified' | 'Rejected';
+  paymentScreenshot?: string | null; // Legacy field for historical records
+  credentialDeliveryStatus?: 'queued' | 'accepted' | 'failed' | 'delivered';
 }
 
 export interface ProjectSubmission {

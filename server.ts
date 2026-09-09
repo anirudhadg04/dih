@@ -11,26 +11,11 @@ import nodemailer from "nodemailer";
 import QRCode from "qrcode";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
-import { createWorker } from "tesseract.js";
 import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 
 const execFileAsync = promisify(execFile);
-
-let paymentOcrWorkerPromise: Promise<any> | null = null;
-
-async function readPaymentProofText(imageBytes: Buffer): Promise<string> {
-  if (!paymentOcrWorkerPromise) {
-    paymentOcrWorkerPromise = createWorker("eng").catch((error) => {
-      paymentOcrWorkerPromise = null;
-      throw error;
-    });
-  }
-  const worker = await paymentOcrWorkerPromise;
-  const result = await worker.recognize(imageBytes);
-  return String(result?.data?.text || "");
-}
 
 declare global {
   namespace Express {
@@ -290,8 +275,8 @@ export async function startServer() {
   const app = express();
   const requestedPort = PUBLIC_PORT;
 
-  // An 8 MB screenshot expands when sent as a base64 data URL.
-  app.use(express.json({ limit: "16mb" }));
+  // Hardened payload limit (256kb) to prevent DoS via large JSON payloads.
+  app.use(express.json({ limit: "256kb" }));
 
   // =============================================================
   // Production hardening / reliability middleware
@@ -481,16 +466,32 @@ export async function startServer() {
   });
   app.use("/api", globalLimiter);
 
-  // Stricter throttle for account-authentication + email-sending endpoints,
-  // which are the most common abuse / spambot targets.
+  // Stricter throttle for account-authentication + email-sending endpoints
   const authLimiter = rateLimit({
     windowMs: 60 * 1000,
-    limit: 20,
+    limit: 30,
     standardHeaders: false,
     legacyHeaders: true,
-    message: { success: false, error: "Too many attempts from this IP. Please wait a moment and retry." },
+    message: { success: false, error: "Too many authentication attempts from this IP. Please wait a moment and retry." },
   });
-  app.use(["/api/participant-login", "/api/admin-login", "/api/send-registration-email", "/api/register", "/api/verify-payment", "/api/finance/verify-utr"], authLimiter);
+  app.use([
+    "/api/participant-login",
+    "/api/admin-login",
+    "/api/send-registration-email",
+    "/api/registration/:teamId/deliver-credentials",
+    "/api/registration/:teamId/deliver-credentials/retry",
+    "/api/finance/verify-utr"
+  ], authLimiter);
+
+  // Dedicated registration throttle (60 registrations / min per IP)
+  const registrationLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 60,
+    standardHeaders: false,
+    legacyHeaders: true,
+    message: { success: false, error: "Registration request volume exceeded from this IP. Please wait a moment." },
+  });
+  app.use("/api/register", registrationLimiter);
 
   // In-Memory Data Store (Clean initialization)
   let teams: Team[] = [];
@@ -500,6 +501,19 @@ export async function startServer() {
   let sponsors: Sponsor[] = [...SPONSORS];
   let milestoneReports: MilestoneReport[] = [];
   let mentorBookings: MentorBooking[] = [];
+
+  // Idempotency cache for registrations (10-minute TTL)
+  const idempotencyStore = new Map<string, { status: number; body: any; expiresAt: number }>();
+  const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
+
+  // Mutex lock to serialize registration execution and prevent race conditions
+  let registrationQueue: Promise<any> = Promise.resolve();
+  function withRegistrationLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = () => fn();
+    const next = registrationQueue.then(run, run);
+    registrationQueue = next.catch(() => {});
+    return next;
+  }
 
   // Monotonic sequence for collision-free team/member identity.
   // Derived from a counter (not teams.length) so IDs are unique even when
@@ -908,7 +922,318 @@ export async function startServer() {
     }
   });
 
+  // Payment UTR Validation Helper
+  function validatePaymentUtr(utr: any, confirmUtr: any): { valid: boolean; error?: string; cleanUtr?: string } {
+    if (!utr || typeof utr !== "string" || !confirmUtr || typeof confirmUtr !== "string") {
+      return { valid: false, error: "Payment UTR and UTR confirmation are required." };
+    }
+    const clean = utr.trim().toUpperCase();
+    const cleanConfirm = confirmUtr.trim().toUpperCase();
+
+    if (clean !== cleanConfirm) {
+      return { valid: false, error: "Payment UTR and confirmation do not match." };
+    }
+    if (/\s/.test(clean) || /[@./\\]/.test(clean)) {
+      return { valid: false, error: "Invalid UTR format. UTR must be an alphanumeric transaction reference (letters and numbers only, no spaces or special characters)." };
+    }
+    const utrRegex = /^[A-Z0-9]{12,22}$/;
+    if (!utrRegex.test(clean)) {
+      return { valid: false, error: "Invalid UTR length. Transaction reference must be between 12 and 22 alphanumeric characters." };
+    }
+    const duplicate = teams.find(t => t.paymentUtr && t.paymentUtr.trim().toUpperCase() === clean);
+    if (duplicate) {
+      return { valid: false, error: "This UPI Transaction ID / UTR has already been submitted for another registration." };
+    }
+    return { valid: true, cleanUtr: clean };
+  }
+
+  // Team & Participant Registration Validation Helper
+  function validateTeamRegistration(body: any): { valid: boolean; error?: string } {
+    const { teamName, leader, members } = body || {};
+    if (!teamName || typeof teamName !== "string" || !teamName.trim()) {
+      return { valid: false, error: "Team Name is required." };
+    }
+    if (!leader || typeof leader !== "object") {
+      return { valid: false, error: "Leader details are required." };
+    }
+    if (!Array.isArray(members)) {
+      return { valid: false, error: "Members must be provided as an array." };
+    }
+    const memberCount = members.length;
+    if (memberCount < 1 || memberCount > 3) {
+      return { valid: false, error: `Invalid team size. Teams must consist of 1 Leader and 1 to 3 Members (Total 2 to 4 participants). Current team size: ${memberCount + 1}.` };
+    }
+
+    const allParticipants = [
+      { ...leader, role: 'Leader' },
+      ...members.map((m: any) => ({ ...m, role: 'Member' }))
+    ];
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailsSeen = new Set<string>();
+    const usnsSeen = new Set<string>();
+
+    for (let i = 0; i < allParticipants.length; i++) {
+      const p = allParticipants[i];
+      const role = p.role || (i === 0 ? "Leader" : `Member ${i}`);
+      if (!p.fullName || typeof p.fullName !== "string" || !p.fullName.trim()) {
+        return { valid: false, error: `${role}: Full name is required.` };
+      }
+      if (!p.email || typeof p.email !== "string" || !emailRegex.test(p.email.trim())) {
+        return { valid: false, error: `${role}: A valid email address is required.` };
+      }
+      const cleanEmail = p.email.trim().toLowerCase();
+      if (emailsSeen.has(cleanEmail)) {
+        return { valid: false, error: `Duplicate email "${p.email}" found in registration. Each participant must have a unique email.` };
+      }
+      emailsSeen.add(cleanEmail);
+
+      const phoneDigits = (p.phone ? String(p.phone) : "").trim().replace(/\D/g, "");
+      if (phoneDigits.length < 10) {
+        return { valid: false, error: `${role}: A valid phone number (at least 10 digits) is required.` };
+      }
+
+      if (!p.usn || typeof p.usn !== "string" || !p.usn.trim()) {
+        return { valid: false, error: `${role}: University Seat Number (USN) / Student ID is required.` };
+      }
+      const cleanUsn = p.usn.trim().toUpperCase();
+      if (usnsSeen.has(cleanUsn)) {
+        return { valid: false, error: `Duplicate USN "${p.usn}" found in registration. Each participant must have a unique USN.` };
+      }
+      usnsSeen.add(cleanUsn);
+
+      for (const existingTeam of teams) {
+        for (const em of existingTeam.members || []) {
+          if (em.email && em.email.trim().toLowerCase() === cleanEmail) {
+            return { valid: false, error: `Email "${p.email}" is already registered under Team "${existingTeam.teamName}" (${existingTeam.id}).` };
+          }
+          if (em.usn && em.usn.trim().toUpperCase() === cleanUsn) {
+            return { valid: false, error: `USN "${p.usn}" is already registered under Team "${existingTeam.teamName}" (${existingTeam.id}).` };
+          }
+        }
+      }
+    }
+
+    return { valid: true };
+  }
+
+  // Asynchronous Credential Delivery Function
+  async function deliverCredentialsForTeam(team: Team, rawAccessPassword?: string): Promise<{
+    success: boolean;
+    deliveredCount: number;
+    failedCount: number;
+    results: Array<{ recipient: string; status: string; error?: string }>;
+  }> {
+    const participantList = (team.members || []).map((m) => ({
+      email: (m.email || "").trim(),
+      name: m.fullName || "Participant",
+      college: m.college || "KSSEM",
+      role: m.role || "Member",
+      usn: m.usn || ""
+    })).filter(p => Boolean(p.email));
+
+    if (participantList.length === 0) {
+      return { success: false, deliveredCount: 0, failedCount: 0, results: [] };
+    }
+
+    const recipientList = participantList.map(p => p.email);
+    const subject = `🎉 Registration Confirmed: ANVATION 2026 [Team ID: ${team.id}]`;
+    const venue = cmsConfig.venueLocation || "K.S. School of Engineering & Management (KSSEM), Kanakapura Road, Bengaluru - 560109";
+    const dates = cmsConfig.eventDates || "October 8 - October 9, 2026 (24-Hour Hackathon)";
+
+    let gateQr = "";
+    let gateQrBuffer: Buffer | null = null;
+    try {
+      gateQr = await QRCode.toDataURL(String(team.id || "AN-000"), {
+        width: 220,
+        margin: 1,
+        errorCorrectionLevel: "H",
+        color: { dark: "#0B192C", light: "#FFFFFF" }
+      });
+      gateQrBuffer = await QRCode.toBuffer(String(team.id || "AN-000"), {
+        width: 220,
+        margin: 1,
+        errorCorrectionLevel: "H",
+        color: { dark: "#0B192C", light: "#FFFFFF" }
+      });
+    } catch (qrErr: any) {
+      console.warn(`[QR GENERATION] Warning for team ${team.id}:`, qrErr?.message || qrErr);
+    }
+
+    const qrImgForEml = gateQr ? `<img src="${gateQr}" style="width:180px;height:180px;" alt="Gate Pass QR" />` : `<span>Show your Team ID at the gate scanner.</span>`;
+    const qrImgForMail = gateQr ? `<img src="cid:gate-pass-qr" style="width:180px;height:180px;" alt="Gate Pass QR" />` : `<span>Show your Team ID at the gate scanner.</span>`;
+
+    const membersRows = participantList.map((p) =>
+      `<tr>
+        <td style="padding:5px 8px;border:1px solid #e2e8f0;font-weight:600;font-size:12px;color:#0f172a;">${p.name}</td>
+        <td style="padding:5px 8px;border:1px solid #e2e8f0;font-family:monospace;font-size:12px;color:#334155;">${p.email}</td>
+        <td style="padding:5px 8px;border:1px solid #e2e8f0;font-size:12px;color:#334155;">${p.college}</td>
+        <td style="padding:5px 8px;border:1px solid #e2e8f0;font-size:12px;color:#334155;">${p.role}</td>
+      </tr>`
+    ).join("");
+
+    const passwordRow = rawAccessPassword
+      ? `<tr><td style="padding:6px 0;color:#475569;">Portal Password</td><td style="padding:6px 0;font-weight:bold;font-family:monospace;color:#7e22ce;">${rawAccessPassword}</td></tr>`
+      : `<tr><td style="padding:6px 0;color:#475569;">Portal Login</td><td style="padding:6px 0;color:#0284c7;">Use the password provided during initial registration</td></tr>`;
+
+    const getHtmlBody = (isMail: boolean) => `
+<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;color:#0f172a;">
+  <div style="background:#0b192c;color:#fff;padding:22px 26px;">
+    <div style="font-size:22px;font-weight:800;letter-spacing:1px;">ANVATION 2026</div>
+    <div style="font-size:12px;color:#67e8f9;">NATIONAL LEVEL 24-HOUR HACKATHON</div>
+  </div>
+  <div style="padding:24px 26px;line-height:1.6;">
+    <h2 style="margin-top:0;color:#0f172a;">Registration Confirmed ✓</h2>
+    <p>Dear <strong>{{PARTICIPANT_NAME}}</strong>,</p>
+    <p>Congratulations! Your team's registration for <strong>ANVATION 2026</strong> has been confirmed.</p>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px;">
+      <tr><td style="padding:6px 0;color:#475569;">Team ID</td><td style="padding:6px 0;font-weight:bold;font-family:monospace;color:#0284c7;">${team.id}</td></tr>
+      <tr><td style="padding:6px 0;color:#475569;">Registration No</td><td style="padding:6px 0;font-weight:bold;">${team.regNumber}</td></tr>
+      <tr><td style="padding:6px 0;color:#475569;">Team Name</td><td style="padding:6px 0;font-weight:bold;">${team.teamName}</td></tr>
+      <tr><td style="padding:6px 0;color:#475569;">Track</td><td style="padding:6px 0;font-weight:bold;">${team.preferredTrack}</td></tr>
+      ${passwordRow}
+      <tr><td style="padding:6px 0;color:#475569;">Payment UTR</td><td style="padding:6px 0;font-family:monospace;color:#16a34a;font-weight:600;">${team.paymentUtr || 'SUBMITTED'}</td></tr>
+      <tr><td style="padding:6px 0;color:#475569;">Venue</td><td style="padding:6px 0;font-weight:bold;">${venue}</td></tr>
+      <tr><td style="padding:6px 0;color:#475569;">Dates</td><td style="padding:6px 0;font-weight:bold;">${dates}</td></tr>
+    </table>
+
+    <div style="margin-top:14px;">
+      <div style="font-weight:800;color:#0b192c;margin-bottom:6px;">Registered Participants</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="background:#f1f5f9;">
+            <th style="padding:5px 8px;border:1px solid #e2e8f0;text-align:left;">Name</th>
+            <th style="padding:5px 8px;border:1px solid #e2e8f0;text-align:left;">Email</th>
+            <th style="padding:5px 8px;border:1px solid #e2e8f0;text-align:left;">College</th>
+            <th style="padding:5px 8px;border:1px solid #e2e8f0;text-align:left;">Role</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${membersRows}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:18px;padding:14px;border:1px dashed #0284c7;border-radius:10px;text-align:center;background:#f0f9ff;">
+      <div style="font-weight:800;color:#0b7490;margin-bottom:8px;">GATE ENTRY PASS</div>
+      ${isMail ? qrImgForMail : qrImgForEml}
+      <div style="font-size:11px;color:#475569;margin-top:6px;">Present this QR and your college ID at the KSSEM Gate Check-in desk on ${dates}.</div>
+    </div>
+  </div>
+  <div style="background:#f1f5f9;padding:14px 26px;font-size:12px;color:#64748b;">
+    For any help, write to ${cmsConfig.contactEmail || 'anvation2026@kssem.edu.in'} · Generated ${new Date().toLocaleString()}
+  </div>
+</div>`;
+
+    const getTextContent = () => `ANVATION 2026 - Registration Confirmed
+Hello {{PARTICIPANT_NAME}},
+
+Your team's registration for ANVATION 2026 has been confirmed.
+Team ID: ${team.id}
+Registration No: ${team.regNumber}
+Team Name: ${team.teamName}
+Track: ${team.preferredTrack}
+${rawAccessPassword ? `Portal Password: ${rawAccessPassword}` : ''}
+Payment UTR: ${team.paymentUtr || 'SUBMITTED'}
+Venue: ${venue}
+Dates: ${dates}
+
+Use your Team ID and Password (or Leader Email) to log into the Participant Portal.
+Present your Gate Entry Pass QR code at the entrance desk.`;
+
+    const htmlMailTemplate = getHtmlBody(true);
+    const textTemplate = getTextContent();
+
+    const recipientResults: Array<{ recipient: string; status: string; error?: string }> = [];
+    let deliveredCount = 0;
+    let failedCount = 0;
+
+    const smtpHost = process.env.SMTP_HOST;
+    if (smtpHost) {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: process.env.SMTP_SECURE === "true",
+        auth: {
+          user: process.env.SMTP_USER || "",
+          pass: process.env.SMTP_PASS || ""
+        }
+      });
+      const from = process.env.MAIL_FROM || `"ANVATION 2026" <${process.env.SMTP_USER || "noreply@anvation.local"}>`;
+
+      let smtpError = "";
+      try {
+        await transporter.verify();
+      } catch (verifyErr: any) {
+        smtpError = String((verifyErr && verifyErr.message) || verifyErr);
+        console.error(`[EMAIL] SMTP verification failed: ${smtpError}`);
+      }
+
+      if (smtpError) {
+        for (const p of participantList) {
+          recipientResults.push({ recipient: p.email, status: "FAILED", error: smtpError });
+          failedCount++;
+        }
+        team.credentialDeliveryStatus = "failed";
+        markDirty();
+        return { success: false, deliveredCount: 0, failedCount, results: recipientResults };
+      }
+
+      for (const p of participantList) {
+        try {
+          const personalizedHtml = htmlMailTemplate.replace("{{PARTICIPANT_NAME}}", p.name);
+          const personalizedText = textTemplate.replace("{{PARTICIPANT_NAME}}", p.name);
+
+          const info = await transporter.sendMail({
+            from,
+            to: p.email,
+            subject,
+            text: personalizedText,
+            html: personalizedHtml,
+            attachments: gateQrBuffer
+              ? [{
+                  filename: `gate-pass-${team.id}.png`,
+                  content: gateQrBuffer,
+                  cid: "gate-pass-qr",
+                  contentType: "image/png"
+                }]
+              : undefined
+          });
+          deliveredCount++;
+          recipientResults.push({ recipient: p.email, status: "SENT" });
+          console.log(`[EMAIL SENT] To: ${p.email} | Team: ${team.id} | MsgId: ${info.messageId}`);
+        } catch (mailErr: any) {
+          failedCount++;
+          recipientResults.push({ recipient: p.email, status: "FAILED", error: String(mailErr.message || mailErr) });
+          console.error(`[EMAIL FAILED] To: ${p.email} | Team: ${team.id} | ${mailErr.message}`);
+        }
+      }
+
+      team.credentialDeliveryStatus = failedCount === 0 ? "delivered" : (deliveredCount > 0 ? "delivered" : "failed");
+      markDirty();
+      return { success: deliveredCount > 0, deliveredCount, failedCount, results: recipientResults };
+    } else {
+      for (const p of participantList) {
+        recipientResults.push({ recipient: p.email, status: "READY_LOCAL" });
+        deliveredCount++;
+      }
+      console.log(`[EMAIL LOG] SMTP not configured. Generated confirmation records for: ${recipientList.join(", ")} | Team: ${team.id}`);
+      team.credentialDeliveryStatus = "delivered";
+      markDirty();
+      return { success: true, deliveredCount, failedCount: 0, results: recipientResults };
+    }
+  }
+
+  // Registration Endpoint with Race Protection and Idempotency
   app.post("/api/register", async (req, res) => {
+    const idempotencyKey = req.headers["idempotency-key"] ? String(req.headers["idempotency-key"]).trim() : null;
+    if (idempotencyKey) {
+      const cached = idempotencyStore.get(idempotencyKey);
+      if (cached && Date.now() < cached.expiresAt) {
+        return res.status(cached.status).json(cached.body);
+      }
+    }
+
     try {
       if (cmsConfig.freezeRegistrations || !cmsConfig.registrationOpen) {
         return res.status(403).json({
@@ -917,268 +1242,192 @@ export async function startServer() {
         });
       }
 
-      const { teamName, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentAmount, paymentScreenshot } = req.body;
-      if (!teamName || !leader?.fullName || !leader?.email) {
-        return res.status(400).json({ success: false, error: "Missing required registration fields" });
-      }
-
-      // Payment screenshot is MANDATORY — a team must never be registered (and
-      // its payment recorded) without proof of the successful PhonePe transaction.
-      if (!paymentScreenshot || String(paymentScreenshot).trim() === '') {
-        return res.status(400).json({
-          success: false,
-          error: "Payment screenshot is required. Please upload a screenshot of your successful PhonePe transaction before registering."
-        });
-      }
-
-      const teamIndex = ++nextTeamNumber;
-      const teamId = `AN-${String(teamIndex).padStart(3, '0')}`;
-      const regNumber = `CODE-2026-${String(teamIndex).padStart(3, '0')}`;
-
-      const leaderParticipant: Participant = {
-        id: `p-${teamIndex}-1`,
-        fullName: leader.fullName,
-        college: leader.college || 'KS School of Engineering & Management',
-        department: leader.department || 'Computer Science & Engineering',
-        semester: leader.semester || '6th Semester',
-        email: leader.email,
-        phone: leader.phone || '',
-        usn: leader.usn || `1KG23CS${Math.floor(10 + Math.random() * 89)}`,
-        gender: leader.gender || 'Male',
-        githubUrl: leader.githubUrl,
-        linkedinUrl: leader.linkedinUrl,
-        role: 'Leader',
-        teamId,
-        accommodationRequired: !!accommodationRequired,
-        emergencyContact: leader.emergencyContact || leader.phone || '',
-        checkedIn: false,
-        foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
-      };
-
-      const formattedMembers: Participant[] = members.map((m: any, idx: number) => ({
-        id: `p-${teamIndex}-${idx + 2}`,
-        fullName: m.fullName,
-        college: m.college || leader.college || 'KSSEM',
-        department: m.department || 'CSE',
-        semester: m.semester || '6th Semester',
-        email: m.email,
-        phone: m.phone || '',
-        usn: m.usn || `1KG23CS${Math.floor(10 + Math.random() * 89)}`,
-        gender: m.gender || 'Male',
-        githubUrl: m.githubUrl,
-        linkedinUrl: m.linkedinUrl,
-        role: 'Member',
-        teamId,
-        accommodationRequired: !!accommodationRequired,
-        emergencyContact: m.emergencyContact || leader.phone || '',
-        checkedIn: false,
-        foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
-      }));
-
-      const accessPassword = `CODE2026#${Math.floor(1000 + Math.random() * 9000)}`;
-
-      const newTeam: Team = {
-        id: teamId,
-        regNumber,
-        teamName,
-        leaderEmail: leader.email,
-        accessPassword: hashPassword(accessPassword),
-        preferredTrack: preferredTrack || 'Artificial Intelligence & Machine Learning',
-        members: [leaderParticipant, ...formattedMembers],
-        status: 'Confirmed',
-        createdAt: new Date().toISOString(),
-        projectSubmitted: false,
-        paymentUtr: paymentUtr || 'PENDING',
-        paymentStatus: 'Verified',
-        paymentScreenshot: paymentScreenshot || null
-      };
-
-      // Registration data is also written to a lightweight, append-only CSV
-      // before we report success. This gives organisers a recoverable list of
-      // every participant even if the Admin Portal is unavailable later.
-      //
-      // Do this before mutating `teams`: a failed backup write must never leave
-      // a registration that the participant thinks has completed successfully.
-      try {
-        await appendParticipantRegistrationBackup(newTeam);
-      } catch (backupError) {
-        console.error("[BACKUP] Registration CSV write failed; registration was not accepted:", backupError);
-        return res.status(503).json({
-          success: false,
-          error: "Registration backup is temporarily unavailable. Please retry in a moment; no registration has been recorded."
-        });
-      }
-
-      try {
-        await syncParticipantBackupToGitHub(newTeam);
-      } catch (syncError) {
-        console.error("[BACKUP] GitHub CSV sync failed; registration was not accepted:", syncError);
-        return res.status(503).json({
-          success: false,
-          error: "Registration backup could not be published. Please retry in a moment; no registration has been recorded."
-        });
-      }
-
-      teams.push(newTeam);
-      markDirty(); // flush registration to disk promptly
-
-      // Automated registration email trigger for all team members
-      const allTeamEmails = [
-        { email: leader.email, name: leader.fullName, role: 'Leader' },
-        ...members.filter((m: any) => m.email).map((m: any) => ({ email: m.email, name: m.fullName, role: 'Member' }))
-      ];
-
-      const emailRecords = allTeamEmails.map(member => {
-        const emailRecord = {
-          id: `mail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          recipient: member.email,
-          recipientName: member.name,
-          role: member.role,
-          teamId,
-          teamName,
-          track: preferredTrack || 'AI / ML',
-          accessPassword,
-          regNumber,
-          subject: `🎉 Registration Confirmed: ANVATION 2026 [Team ID: ${teamId}]`,
-          venue: "K.S. School of Engineering and Management (KSSEM), Kanakapura Road, Bengaluru - 560109",
-          dates: "October 8 - October 9, 2026 (24-Hour Hackathon)",
-          dispatchedAt: new Date().toISOString(),
-          status: "DELIVERED"
-        };
-        console.log(`[EMAIL DISPATCHED] To: ${member.email} (${member.name}) | Team: ${teamId} | Pass: ${accessPassword}`);
-        return emailRecord;
-      });
-
-      const totalParticipants = teams.reduce((acc, t) => acc + t.members.length, 0);
-      const uniqueColleges = new Set(teams.flatMap(t => t.members.map(m => m.college))).size;
-      const totalCapacity = 350;
-      const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
-      const registrationTeam = sanitizeTeamForClient(newTeam);
-
-      res.json({
-        success: true,
-        team: registrationTeam,
-        paymentAmount: Number(paymentAmount) || newTeam.members.length * Number(cmsConfig.registrationFee || 1),
-        emailDispatched: true,
-        emailRecipients: allTeamEmails.map(e => e.email),
-        emailRecords,
-        stats: {
-          registeredCount: totalParticipants,
-          collegesCount: uniqueColleges,
-          seatsLeft,
-          totalSeats: totalCapacity,
-          totalTeams: teams.length
+      const result = await withRegistrationLock(async () => {
+        // 1. Validation
+        const teamValidation = validateTeamRegistration(req.body);
+        if (!teamValidation.valid) {
+          return { status: 400, body: { success: false, error: teamValidation.error } };
         }
+
+        const { teamName, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentUtrConfirm } = req.body;
+
+        const utrValidation = validatePaymentUtr(paymentUtr, paymentUtrConfirm);
+        if (!utrValidation.valid) {
+          return { status: 400, body: { success: false, error: utrValidation.error } };
+        }
+        const cleanUtr = utrValidation.cleanUtr!;
+
+        // 2. Calculate fee strictly on server
+        const totalParticipantsCount = 1 + members.length;
+        const feePerHead = Number(cmsConfig.registrationFee) || 1;
+        const calculatedFee = totalParticipantsCount * feePerHead;
+
+        // 3. Generate IDs and secure password
+        const teamIndex = ++nextTeamNumber;
+        const teamId = `AN-${String(teamIndex).padStart(3, '0')}`;
+        const regNumber = `CODE-2026-${String(teamIndex).padStart(3, '0')}`;
+
+        const leaderParticipant: Participant = {
+          id: `p-${teamIndex}-1`,
+          fullName: leader.fullName.trim(),
+          college: leader.college?.trim() || 'KS School of Engineering & Management',
+          department: leader.department?.trim() || 'Computer Science & Engineering',
+          semester: leader.semester?.trim() || '6th Semester',
+          email: leader.email.trim().toLowerCase(),
+          phone: leader.phone?.trim() || '',
+          usn: leader.usn.trim().toUpperCase(),
+          gender: leader.gender || 'Male',
+          githubUrl: leader.githubUrl?.trim() || '',
+          linkedinUrl: leader.linkedinUrl?.trim() || '',
+          role: 'Leader',
+          teamId,
+          accommodationRequired: !!accommodationRequired,
+          emergencyContact: leader.emergencyContact?.trim() || leader.phone?.trim() || '',
+          checkedIn: false,
+          foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
+        };
+
+        const formattedMembers: Participant[] = members.map((m: any, idx: number) => ({
+          id: `p-${teamIndex}-${idx + 2}`,
+          fullName: m.fullName.trim(),
+          college: m.college?.trim() || leader.college?.trim() || 'KSSEM',
+          department: m.department?.trim() || 'CSE',
+          semester: m.semester?.trim() || '6th Semester',
+          email: m.email.trim().toLowerCase(),
+          phone: m.phone?.trim() || '',
+          usn: m.usn.trim().toUpperCase(),
+          gender: m.gender || 'Male',
+          githubUrl: m.githubUrl?.trim() || '',
+          linkedinUrl: m.linkedinUrl?.trim() || '',
+          role: 'Member',
+          teamId,
+          accommodationRequired: !!accommodationRequired,
+          emergencyContact: m.emergencyContact?.trim() || leader.phone?.trim() || '',
+          checkedIn: false,
+          foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
+        }));
+
+        const rawAccessPassword = `CODE2026#${Math.floor(1000 + Math.random() * 9000)}`;
+
+        const newTeam: Team = {
+          id: teamId,
+          regNumber,
+          teamName: teamName.trim(),
+          leaderEmail: leaderParticipant.email,
+          accessPassword: hashPassword(rawAccessPassword),
+          preferredTrack: preferredTrack || 'Artificial Intelligence & Machine Learning',
+          members: [leaderParticipant, ...formattedMembers],
+          status: 'Confirmed',
+          createdAt: new Date().toISOString(),
+          projectSubmitted: false,
+          paymentUtr: cleanUtr,
+          paymentStatus: 'Verified',
+          credentialDeliveryStatus: 'queued'
+        };
+
+        // 4. Non-negotiable CSV backup & GitHub sync
+        try {
+          await appendParticipantRegistrationBackup(newTeam);
+        } catch (backupError) {
+          console.error("[BACKUP] Registration CSV write failed; registration was not accepted:", backupError);
+          return {
+            status: 503,
+            body: {
+              success: false,
+              error: "Registration backup is temporarily unavailable. Please retry in a moment; no registration has been recorded."
+            }
+          };
+        }
+
+        try {
+          await syncParticipantBackupToGitHub(newTeam);
+        } catch (syncError) {
+          console.error("[BACKUP] GitHub CSV sync failed; registration was not accepted:", syncError);
+          return {
+            status: 503,
+            body: {
+              success: false,
+              error: "Registration backup could not be published. Please retry in a moment; no registration has been recorded."
+            }
+          };
+        }
+
+        // 5. Store team in memory and flush to disk
+        teams.push(newTeam);
+        markDirty();
+
+        // 6. Trigger non-blocking async credential delivery in the background
+        deliverCredentialsForTeam(newTeam, rawAccessPassword).catch((deliverErr) => {
+          console.error(`[CREDENTIAL DELIVERY] Background delivery error for team ${newTeam.id}:`, deliverErr);
+        });
+
+        const totalParticipants = teams.reduce((acc, t) => acc + (t.members?.length || 0), 0);
+        const uniqueColleges = new Set(teams.flatMap(t => (t.members || []).map(m => m.college))).size;
+        const totalCapacity = 350;
+        const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
+
+        const responseBody = {
+          success: true,
+          team: sanitizeTeamForClient(newTeam),
+          payment: {
+            utr: cleanUtr,
+            amount: calculatedFee,
+            status: 'Submitted'
+          },
+          delivery: {
+            status: 'QUEUED'
+          },
+          stats: {
+            registeredCount: totalParticipants,
+            collegesCount: uniqueColleges,
+            seatsLeft,
+            totalSeats: totalCapacity,
+            totalTeams: teams.length
+          }
+        };
+
+        return { status: 200, body: responseBody };
       });
+
+      if (idempotencyKey && result.status === 200) {
+        idempotencyStore.set(idempotencyKey, {
+          status: result.status,
+          body: result.body,
+          expiresAt: Date.now() + IDEMPOTENCY_TTL_MS
+        });
+      }
+
+      return res.status(result.status).json(result.body);
+    } catch (err: any) {
+      console.error("[REGISTRATION ERROR]", err);
+      return res.status(500).json({ success: false, error: err.message || "Registration failed" });
+    }
+  });
+
+  // Credential Delivery & Retry Endpoints
+  app.post("/api/registration/:teamId/deliver-credentials", requireAdmin, async (req, res) => {
+    try {
+      const { teamId } = req.params;
+      const team = teams.find(t => t.id.toLowerCase() === teamId.toLowerCase() || (t.regNumber && t.regNumber.toLowerCase() === teamId.toLowerCase()));
+      if (!team) {
+        return res.status(404).json({ success: false, error: "Team not found" });
+      }
+      const report = await deliverCredentialsForTeam(team);
+      res.json({ success: report.success, teamId: team.id, report });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // Verify PhonePe Payment Endpoint
-  app.post("/api/verify-payment", async (req, res) => {
+  app.post("/api/registration/:teamId/deliver-credentials/retry", requireAdmin, async (req, res) => {
     try {
-      const { utr, amount, paymentScreenshot } = req.body;
-      const expectedAmount = Number(amount) || cmsConfig.registrationFee;
-      const cleanUtr = (utr ? String(utr).trim().toUpperCase() : '');
-      const validUtrPattern = /^[A-Z0-9]{12,22}$/i;
-      const screenshotMatch = typeof paymentScreenshot === 'string'
-        ? paymentScreenshot.match(/^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/i)
-        : null;
-
-      if (!screenshotMatch) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "Payment verification failed: the uploaded proof is missing or is not a supported PNG, JPG, GIF, or WebP image."
-        });
+      const { teamId } = req.params;
+      const team = teams.find(t => t.id.toLowerCase() === teamId.toLowerCase() || (t.regNumber && t.regNumber.toLowerCase() === teamId.toLowerCase()));
+      if (!team) {
+        return res.status(404).json({ success: false, error: "Team not found" });
       }
-
-      const screenshotBytes = Buffer.from(screenshotMatch[2], "base64");
-      if (screenshotBytes.length === 0 || screenshotBytes.length > 8 * 1024 * 1024) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "Payment verification failed: the screenshot must be under 8 MB and contain image data."
-        });
-      }
-
-      const isPng = screenshotBytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-      const isJpeg = screenshotBytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
-      const isGif = screenshotBytes.subarray(0, 3).toString("ascii") === "GIF";
-      const isWebp = screenshotBytes.subarray(0, 4).toString("ascii") === "RIFF"
-        && screenshotBytes.subarray(8, 12).toString("ascii") === "WEBP";
-      if (!isPng && !isJpeg && !isGif && !isWebp) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "Payment verification failed: the uploaded file does not contain valid image data."
-        });
-      }
-
-      if (!cleanUtr) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "Please enter the actual PhonePe/UPI transaction reference from your payment confirmation."
-        });
-      }
-
-      if (!validUtrPattern.test(cleanUtr)) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "Invalid UTR. Use the actual 12+ digit PhonePe/UPI transaction reference (letters/numbers only)."
-        });
-      }
-
-      let proofText = "";
-      try {
-        proofText = await readPaymentProofText(screenshotBytes);
-      } catch (ocrError: any) {
-        console.error("[PAYMENT OCR] Could not read payment screenshot:", ocrError?.message || ocrError);
-        return res.status(503).json({
-          success: false,
-          verified: false,
-          error: "Payment proof could not be read right now. Please retry once the verification service is available."
-        });
-      }
-
-      const proofTextCompact = proofText.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const expectedUtr = cleanUtr.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const beneficiaryId = "kgsoumya1605okicici";
-      const expectedAmountText = String(expectedAmount).replace(/\.0+$/, "");
-      if (!proofTextCompact.includes(expectedUtr)) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "The uploaded payment screenshot does not contain the UTR you entered. Please upload the receipt for this transaction."
-        });
-      }
-      if (!proofTextCompact.includes(beneficiaryId)) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "The uploaded payment screenshot does not show the required PhonePe UPI ID kgsoumya1605@okicici."
-        });
-      }
-      if (!proofTextCompact.includes(expectedAmountText)) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: `The uploaded payment screenshot does not show the expected payment amount of ₹${expectedAmount}.`
-        });
-      }
-
-      res.json({
-        success: true,
-        verified: true,
-        utr: cleanUtr,
-        amount: expectedAmount,
-        beneficiary: "ANVATION 2026 (kgsoumya1605@okicici)",
-        verifiedAt: new Date().toISOString(),
-        message: `Payment proof OCR matched the UTR, beneficiary, and amount for ₹${expectedAmount}. Final settlement must still be confirmed by the admin desk.`
-      });
+      const report = await deliverCredentialsForTeam(team);
+      res.json({ success: report.success, teamId: team.id, report });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -1188,33 +1437,41 @@ export async function startServer() {
   app.get("/api/payment-listener", (req, res) => {
     try {
       const { upiId } = req.query;
-      const ref = `UPI${Date.now().toString().slice(-8)}${Math.floor(1000 + Math.random() * 9000)}`;
       res.json({
         success: true,
         listenerActive: true,
         targetUpi: upiId || "kgsoumya1605@okicici",
         amount: String(cmsConfig.registrationFee),
-        suggestedUtr: ref,
-        status: "WAITING_FOR_USER_CONFIRMATION"
+        status: "READY"
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // Registration Confirmation Email dispatch. Sends a real mail to every
-  // leader/member when SMTP is configured (SMTP_HOST/USER/PASS), else returns a
-  // downloadable .eml fallback. Includes the Gate Entry Pass QR in the body.
+  // Registration Confirmation Email dispatch (Legacy/Direct Trigger Endpoint)
   app.post("/api/send-registration-email", async (req, res) => {
     try {
       const { teamId, email, emails, teamName, track, password, regNumber, participants } = req.body;
-      // participants: [{ email, name, college, role }] — used so the confirmation
-      // mail always includes the College of every registered participant.
+      const team = teams.find(t => t.id === teamId || t.regNumber === teamId || t.regNumber === regNumber);
+      if (team) {
+        const report = await deliverCredentialsForTeam(team, password);
+        return res.json({
+          success: report.success,
+          deliveredCount: report.deliveredCount,
+          failedCount: report.failedCount,
+          recipients: report.results.map(r => r.recipient),
+          emailRecipients: report.results,
+          transport: process.env.SMTP_HOST ? "SMTP" : "LOCAL",
+          smtpConfigured: !!process.env.SMTP_HOST
+        });
+      }
+
       const participantList: Array<{ email: string; name: string; college: string; role: string }> =
         Array.isArray(participants) && participants.length > 0
           ? participants.map((p: any) => ({
               email: String((p && p.email) || '').trim(),
-              name: (p && p.name) || '',
+              name: (p && p.name) || 'Participant',
               college: (p && p.college) || 'Not specified',
               role: (p && p.role) || 'Member'
             }))
@@ -1222,114 +1479,52 @@ export async function startServer() {
       const recipientList: string[] = participantList.length > 0
         ? participantList.map(p => p.email).filter(Boolean)
         : (emails && Array.isArray(emails) ? emails : (email ? [email] : []));
+
       if (recipientList.length === 0) {
         return res.status(400).json({ success: false, error: "At least one recipient email is required" });
       }
-      const to = recipientList.join(", ");
-      const subject = `Registration Confirmed: ANVATION 2026 [Team ID: ${teamId}]`;
-      const dateStr = new Date().toUTCString();
-      let gateQr = "";
-      let gateQrBuffer: Buffer | null = null;
-      try {
-        gateQr = await QRCode.toDataURL(String(teamId || "AN-000"), { width: 220, margin: 1, errorCorrectionLevel: "H", color: { dark: "#0B192C", light: "#FFFFFF" } });
-        gateQrBuffer = await QRCode.toBuffer(String(teamId || "AN-000"), { width: 220, margin: 1, errorCorrectionLevel: "H", color: { dark: "#0B192C", light: "#FFFFFF" } });
-      } catch (e) { /* optional */ }
-      const venue = "K.S. School of Engineering & Management (KSSEM), Kanakapura Road, Bengaluru - 560109";
-      const dates = "October 8 - October 9, 2026 (24-Hour Hackathon)";
-      const htmlR = `ANVATION 2026 - Registration Confirmed
-Team ID: ${teamId}
-Registration No: ${regNumber}
-Team Name: ${teamName}
-Track: ${track}
-Portal Password: ${password}
-Venue: ${venue}
-Dates: ${dates}
-Use your Team ID and Password (or Leader email) to log into the Participant Portal. Present the Gate Entry Pass QR at the entrance.`;
-      const membersRows = (participantList.length > 0
-        ? participantList
-        : recipientList.map((e) => ({ email: e, name: '', college: 'Not specified', role: 'Participant' }))
-      ).map((p) => `<tr><td style="padding:5px 8px;border:1px solid #e2e8f0;font-family:monospace;font-size:12px;color:#334155;">${p.email}</td><td style="padding:5px 8px;border:1px solid #e2e8f0;font-size:12px;color:#334155;">${p.college}</td><td style="padding:5px 8px;border:1px solid #e2e8f0;font-size:12px;color:#334155;">${p.role}</td></tr>`).join("");
-      // The QR is embedded via a data URL in the downloadable .eml, but webmail
-      // clients like Gmail strip base64 data: images for security. So for real
-      // SMTP delivery we attach the QR as an inline (cid:) image instead, which
-      // Gmail renders reliably in the "GATE ENTRY PASS" block.
-      const qrImgForEml = gateQr ? `<img src="${gateQr}" style="width:180px;height:180px;" />` : `<span>Show your Team ID at the gate scanner.</span>`;
-      const qrImgForMail = gateQr ? `<img src="cid:gate-pass-qr" style="width:180px;height:180px;" />` : `<span>Show your Team ID at the gate scanner.</span>`;
-      const htmlOpen = `<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;color:#0f172a;">
-<div style="background:#0b192c;color:#fff;padding:22px 26px;"><div style="font-size:22px;font-weight:800;letter-spacing:1px;">ANVATION 2026</div><div style="font-size:12px;color:#67e8f9;">NATIONAL LEVEL 24-HOUR HACKATHON</div></div>
-<div style="padding:24px 26px;line-height:1.6;"><h2 style="margin-top:0;">Registration Confirmed ✓</h2>
-<p>Congratulations! Your team's registration for <strong>ANVATION 2026</strong> has been confirmed.</p>
-<table style="width:100%;border-collapse:collapse;font-size:14px;">`;
-      const htmlRows = `<tr><td style="padding:6px 0;color:#475569;">Team ID</td><td style="padding:6px 0;font-weight:bold;font-family:monospace;color:#0284c7;">${teamId}</td></tr>
-<tr><td style="padding:6px 0;color:#475569;">Registration No</td><td style="padding:6px 0;font-weight:bold;">${regNumber}</td></tr>
-<tr><td style="padding:6px 0;color:#475569;">Team Name</td><td style="padding:6px 0;font-weight:bold;">${teamName}</td></tr>
-<tr><td style="padding:6px 0;color:#475569;">Track</td><td style="padding:6px 0;font-weight:bold;">${track}</td></tr>
-<tr><td style="padding:6px 0;color:#475569;">Portal Password</td><td style="padding:6px 0;font-weight:bold;font-family:monospace;color:#7e22ce;">${password}</td></tr>
-<tr><td style="padding:6px 0;color:#475569;">Venue</td><td style="padding:6px 0;font-weight:bold;">${venue}</td></tr>
-<tr><td style="padding:6px 0;color:#475569;">Dates</td><td style="padding:6px 0;font-weight:bold;">${dates}</td></tr></table>
-<div style="margin-top:14px;"><div style="font-weight:800;color:#0b192c;margin-bottom:6px;">Registered Participants &amp; College</div>
-<table style="width:100%;border-collapse:collapse;font-size:12px;"><tr><th style="padding:5px 8px;border:1px solid #e2e8f0;background:#f1f5f9;text-align:left;">Email</th><th style="padding:5px 8px;border:1px solid #e2e8f0;background:#f1f5f9;text-align:left;">College</th><th style="padding:5px 8px;border:1px solid #e2e8f0;background:#f1f5f9;text-align:left;">Role</th></tr>${membersRows}</table></div>
-<div style="margin-top:18px;padding:14px;border:1px dashed #0284c7;border-radius:10px;text-align:center;background:#f0f9ff;"><div style="font-weight:800;color:#0b7490;margin-bottom:8px;">GATE ENTRY PASS</div>${qrImgForEml}<div style="font-size:11px;color:#475569;margin-top:6px;">Present this QR and your college ID at the KSSEM Gate Check-in desk on ${dates}.</div></div>
-</div>
-<div style="background:#f1f5f9;padding:14px 26px;font-size:12px;color:#64748b;">For any help, write to anvation2026@kssem.edu.in · Generated ${new Date().toLocaleString()}</div>
-</div>`;
-      const htmlFull = htmlOpen + htmlRows;
-      // Same body but with the QR referenced by its cid so it renders in Gmail.
-      const htmlMail = htmlOpen + htmlRows.replace(`GATE ENTRY PASS</div>${qrImgForEml}`, `GATE ENTRY PASS</div>${qrImgForMail}`);
-      const eml = [`From: "ANVATION 2026" <noreply@anvation.local>`, `To: ${to}`, `Subject: ${subject}`, `Date: ${dateStr}`, `MIME-Version: 1.0`, `Content-Type: text/html; charset=UTF-8`, "", `${htmlFull}`].join("\r\n");
-      const smtpHost = process.env.SMTP_HOST;
-      const smtpConfigured = !!smtpHost;
-      let delivered = 0, failed = 0;
-      let smtpError = "";
-      const emailRecipients: Array<{ recipient: string; status: string; error?: string }> = [];
-      if (smtpHost) {
-        const transporter = nodemailer.createTransport({ host: smtpHost, port: Number(process.env.SMTP_PORT) || 587, secure: process.env.SMTP_SECURE === "true", auth: { user: process.env.SMTP_USER || "", pass: process.env.SMTP_PASS || "" } });
-        const from = process.env.MAIL_FROM || `"ANVATION 2026" <${process.env.SMTP_USER || "noreply@anvation.local"}>`;
-        // Verify the SMTP connection (login/auth) once before sending so a bad
-        // host or invalid credentials surface a clear, logged error instead of
-        // silently producing only a downloadable .eml file.
-        try {
-          await transporter.verify();
-        } catch (verifyErr: any) {
-          smtpError = String((verifyErr && verifyErr.message) || verifyErr);
-          console.error(`[EMAIL] SMTP verification failed: ${smtpError}`);
-        }
-        if (smtpError) {
-          emailRecipients.push(...recipientList.map((r) => ({ recipient: r, status: "FAILED", error: smtpError })));
-          failed = recipientList.length;
-          return res.json({ success: false, smtpConfigured: true, smtpError, deliveredCount: 0, failedCount: failed, recipients: recipientList, emailRecipients, transport: "SMTP", gatewayMessage: `SMTP is configured but the connection check failed: ${smtpError}. No emails were delivered. Double-check SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS (Gmail requires an App Password, not your login password).`, subject, eml });
-        }
-        for (const recipient of recipientList) {
-          try {
-            const info = await transporter.sendMail({
-              from,
-              to: recipient,
-              subject,
-              text: htmlR,
-              html: htmlMail,
-              attachments: gateQrBuffer
-                ? [{
-                    filename: "gate-pass-qr.png",
-                    content: gateQrBuffer,
-                    cid: "gate-pass-qr",
-                    contentType: "image/png"
-                  }]
-                : undefined
-            });
-            delivered++;
-            emailRecipients.push({ recipient, status: "SENT" });
-            console.log(`[EMAIL SENT] To: ${recipient} | Team: ${teamId} | ${info.messageId}`);
-          } catch (mailErr: any) {
-            failed++;
-            emailRecipients.push({ recipient, status: "FAILED", error: String(mailErr.message || mailErr) });
-            console.error(`[EMAIL FAILED] To: ${recipient} | Team: ${teamId} | ${mailErr.message}`);
-          }
-        }
-        res.json({ success: delivered > 0, deliveredCount: delivered, failedCount: failed, recipients: recipientList, emailRecipients, transport: "SMTP", gatewayMessage: delivered > 0 ? "Confirmation emails sent to all participants." : (failed === recipientList.length ? "SMTP is configured but delivery failed — double-check SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS." : "Some emails could not be delivered."), subject, eml, smtpConfigured });
-      } else {
-        console.warn(`[EMAIL] SMTP NOT CONFIGURED (SMTP_HOST missing) — real mail was NOT delivered. Generated local .eml for: ${recipientList.join(", ")} | Team: ${teamId}`);
-        res.json({ success: true, message: "SMTP not configured — real emails were NOT sent to participants. To actually deliver the confirmation mail (with the Gate Pass QR + college) to leader/member inboxes, set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS and MAIL_FROM, then restart the server. A downloadable .eml was generated as a fallback.", recipients: recipientList, emailRecipients: recipientList.map(r => ({ recipient: r, status: "READY" })), deliveredCount: recipientList.length, failedCount: 0, subject, eml, smtpConfigured: false });
-      }
+
+      const tempTeam: Team = {
+        id: teamId || "AN-000",
+        regNumber: regNumber || "CODE-2026-000",
+        teamName: teamName || "Team",
+        leaderEmail: recipientList[0],
+        accessPassword: "",
+        preferredTrack: track || "General Track",
+        members: (participantList.length > 0 ? participantList : recipientList.map(r => ({ email: r, name: 'Participant', college: 'KSSEM', role: 'Member' }))).map((p, idx) => ({
+          id: `temp-${idx}`,
+          fullName: p.name,
+          college: p.college,
+          department: "CSE",
+          semester: "6th",
+          email: p.email,
+          phone: "",
+          usn: "",
+          gender: "Other",
+          role: p.role as any,
+          teamId: teamId || "AN-000",
+          accommodationRequired: false,
+          emergencyContact: "",
+          checkedIn: false,
+          foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
+        })),
+        status: "Confirmed",
+        createdAt: new Date().toISOString(),
+        projectSubmitted: false,
+        paymentUtr: "SUBMITTED",
+        paymentStatus: "Verified"
+      };
+
+      const report = await deliverCredentialsForTeam(tempTeam, password);
+      res.json({
+        success: report.success,
+        deliveredCount: report.deliveredCount,
+        failedCount: report.failedCount,
+        recipients: report.results.map(r => r.recipient),
+        emailRecipients: report.results,
+        transport: process.env.SMTP_HOST ? "SMTP" : "LOCAL",
+        smtpConfigured: !!process.env.SMTP_HOST
+      });
     } catch (err: any) {
       console.error("[EMAIL ERROR]", err);
       res.status(500).json({ success: false, error: err.message });
@@ -1728,10 +1923,27 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         }));
       }
       if (Array.isArray(saved.adminUsers)) {
-        adminUsers = saved.adminUsers.map((user: any) => ({
-          ...user,
-            password: normalizeStoredPassword(user.password || DEFAULT_ADMIN_PASSWORD)
-        }));
+        const savedMap = new Map(saved.adminUsers.map((u: any) => [u.id, u]));
+        const mergedUsers: AdminUser[] = [];
+        for (const defaultUser of adminUsers) {
+          if (savedMap.has(defaultUser.id)) {
+            const savedU = savedMap.get(defaultUser.id);
+            mergedUsers.push({
+              ...savedU,
+              password: normalizeStoredPassword(savedU.password || DEFAULT_ADMIN_PASSWORD)
+            });
+            savedMap.delete(defaultUser.id);
+          } else {
+            mergedUsers.push(defaultUser);
+          }
+        }
+        for (const customUser of savedMap.values()) {
+          mergedUsers.push({
+            ...customUser,
+            password: normalizeStoredPassword(customUser.password || DEFAULT_ADMIN_PASSWORD)
+          });
+        }
+        adminUsers = mergedUsers;
       }
       if (Array.isArray(saved.checkpoints)) checkpoints = saved.checkpoints;
       if (typeof saved.nextTeamNumber === "number") nextTeamNumber = saved.nextTeamNumber;

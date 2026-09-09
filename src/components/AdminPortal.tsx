@@ -193,7 +193,6 @@ export const AdminPortal: React.FC = () => {
   
   // Modals State
   const [selectedParticipantModal, setSelectedParticipantModal] = useState<Participant | null>(null);
-  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [isEditTeamModalOpen, setIsEditTeamModalOpen] = useState(false);
   const [scoreOverrideModal, setScoreOverrideModal] = useState<{ open: boolean; submissionId: string; currentScore: number; reason: string }>({
@@ -3354,7 +3353,6 @@ export const AdminPortal: React.FC = () => {
                         <th className="p-3">Leader Email</th>
                         <th className="p-3">Amount</th>
                         <th className="p-3">UTR Reference No</th>
-                        <th className="p-3">Screenshot</th>
                         <th className="p-3">Status</th>
                         <th className="p-3">Action</th>
                       </tr>
@@ -3369,19 +3367,6 @@ export const AdminPortal: React.FC = () => {
                           <td className="p-3 text-slate-300 text-[11px]">{t.leaderEmail}</td>
                           <td className="p-3 font-mono font-bold text-emerald-400">₹{t.members.length * (cmsConfig.registrationFee || 1)}</td>
                           <td className="p-3 font-mono text-amber-300 font-bold">{t.paymentUtr || 'N/A'}</td>
-                          <td className="p-3">
-                            {t.paymentScreenshot ? (
-                              <button
-                                type="button"
-                                onClick={() => setScreenshotPreview(t.paymentScreenshot)}
-                                className="px-2.5 py-1 rounded-lg bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-800 font-bold text-[10px]"
-                              >
-                                View Proof
-                              </button>
-                            ) : (
-                              <span className="text-slate-500 text-[10px]">No proof</span>
-                            )}
-                          </td>
                           <td className="p-3">
                             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
                               t.paymentStatus === 'Verified' ? 'bg-emerald-950 text-emerald-400 border-emerald-800' :
@@ -3411,19 +3396,6 @@ export const AdminPortal: React.FC = () => {
                   </table>
                 </div>
               </div>
-
-              {/* Payment Screenshot Preview Modal */}
-              {screenshotPreview && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn" onClick={() => setScreenshotPreview(null)}>
-                  <div className="bg-slate-900 border border-indigo-500/40 rounded-2xl p-4 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-xs font-black text-slate-200 uppercase tracking-wider">Payment Proof Screenshot</h4>
-                      <button type="button" onClick={() => setScreenshotPreview(null)} className="text-slate-400 hover:text-white text-lg leading-none">×</button>
-                    </div>
-                    <img src={screenshotPreview} alt="Payment Proof" className="w-full max-h-[70vh] object-contain rounded-xl border border-slate-700 bg-slate-950" />
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
