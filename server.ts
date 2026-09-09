@@ -450,6 +450,44 @@ export async function startServer() {
     }
   }
 
+  // Participant login uses a short progressive throttle instead of the legacy
+  // five-minute lockout. The map is process-local, so restarting the server
+  // clears any obsolete participant penalty state.
+  const participantLoginAttempts = new Map<string, { count: number; throttledUntil: number }>();
+
+  function checkParticipantLoginThrottle(identifier: string, ip: string): { throttled: boolean; waitSeconds?: number } {
+    const now = Date.now();
+    const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
+    for (const key of keys) {
+      const record = participantLoginAttempts.get(key);
+      if (record && record.throttledUntil > now) {
+        return { throttled: true, waitSeconds: Math.ceil((record.throttledUntil - now) / 1000) };
+      }
+    }
+    return { throttled: false };
+  }
+
+  function recordParticipantLoginFailure(identifier: string, ip: string): number {
+    const now = Date.now();
+    const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
+    const currentCount = Math.max(...keys.map((key) => participantLoginAttempts.get(key)?.count || 0));
+    const nextCount = currentCount + 1;
+    const delaySeconds = nextCount >= 5 ? Math.min((nextCount - 4) * 5, 20) : 0;
+    const throttledUntil = delaySeconds > 0 ? now + delaySeconds * 1000 : 0;
+
+    for (const key of keys) {
+      participantLoginAttempts.set(key, { count: nextCount, throttledUntil });
+    }
+    return delaySeconds;
+  }
+
+  function clearParticipantLoginFailure(identifier: string, ip: string): void {
+    const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
+    for (const key of keys) {
+      participantLoginAttempts.delete(key);
+    }
+  }
+
   const AUTH_COOKIE = "anvation_session";
   const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
   const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_BOOTSTRAP_PASSWORD || "change-me-in-dev-only";
@@ -1362,11 +1400,11 @@ export async function startServer() {
       const cleanId = String(identifier).trim().toLowerCase();
       const cleanPass = String(password).trim();
 
-      const rateCheck = checkLoginRate(cleanId, ip);
-      if (rateCheck.locked) {
+      const throttleCheck = checkParticipantLoginThrottle(cleanId, ip);
+      if (throttleCheck.throttled) {
         return res.status(429).json({
           success: false,
-          error: `Too many failed login attempts. Temporarily locked. Please try again in ${rateCheck.waitSeconds} seconds.`
+          error: `Too many failed login attempts. Please try again in ${throttleCheck.waitSeconds} seconds.`
         });
       }
 
@@ -1383,7 +1421,13 @@ export async function startServer() {
       );
 
       if (!team) {
-        recordLoginFailure(cleanId, ip);
+        const delaySeconds = recordParticipantLoginFailure(cleanId, ip);
+        if (delaySeconds > 0) {
+          return res.status(429).json({
+            success: false,
+            error: `Too many failed login attempts. Please try again in ${delaySeconds} seconds.`
+          });
+        }
         return res.status(401).json({ success: false, error: "Invalid credentials." });
       }
 
@@ -1391,11 +1435,17 @@ export async function startServer() {
       const passMatches = verifyPassword(cleanPass, storedHash);
 
       if (!passMatches) {
-        recordLoginFailure(cleanId, ip);
+        const delaySeconds = recordParticipantLoginFailure(cleanId, ip);
+        if (delaySeconds > 0) {
+          return res.status(429).json({
+            success: false,
+            error: `Too many failed login attempts. Please try again in ${delaySeconds} seconds.`
+          });
+        }
         return res.status(401).json({ success: false, error: "Invalid credentials." });
       }
 
-      clearLoginFailure(cleanId, ip);
+      clearParticipantLoginFailure(cleanId, ip);
 
       const sid = createSession({
         id: team.id,
