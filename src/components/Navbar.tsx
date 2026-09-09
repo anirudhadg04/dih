@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import anvationNavbarLogo from '../assets/branding/anvation-navbar-logo.png';
 import { PortalView } from '../types';
 import { useTheme } from '../theme';
-import { User, ShieldCheck, FileText, Menu, X, Rocket, Sparkles, Clock, Globe } from 'lucide-react';
+import { User, FileText, Menu, X, Rocket, Sparkles, Clock, Globe } from 'lucide-react';
 
 interface NavbarProps {
   currentView: PortalView;
@@ -68,14 +68,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Centered Anvation brand logo */}
         <button 
           onClick={() => setCurrentView('landing')}
-          className="text-left shrink-0 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 rounded-lg p-0 transition-transform active:scale-95"
+          className="inline-flex shrink-0 items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 rounded-lg p-0 transition-transform active:scale-95"
           id="nav-brand-logo-btn"
           aria-label="Go to Anvation event home"
         >
           <img
             src={anvationNavbarLogo}
             alt="Anvation — Explore, Innovate, Transform"
-            className={`h-[68px] w-[300px] sm:w-[390px] lg:h-[76px] object-contain object-left drop-shadow-[0_0_18px_rgba(34,211,238,0.45)] ${isLight ? '' : 'mix-blend-screen'}`}
+            className={`block h-[68px] w-auto max-w-[300px] sm:max-w-[390px] lg:h-[76px] object-contain object-left drop-shadow-[0_0_18px_rgba(34,211,238,0.45)] ${isLight ? '' : 'mix-blend-screen'}`}
           />
         </button>
 
@@ -109,18 +109,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>Participant Portal</span>
             </button>
 
-            <button
-              onClick={() => setCurrentView('admin')}
-              className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all ${
-                currentView === 'admin'
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-              id="nav-view-admin-btn"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Admin Portal</span>
-            </button>
           </div>
 
           {/* Primary Register CTA */}
@@ -204,7 +192,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       {mobileMenuOpen && (
         <div className="md:hidden bg-[var(--surface-drawer)] border-b border-cyan-500/30 px-4 py-6 space-y-4 animate-fadeIn">
           {/* Portal Switcher Mobile */}
-          <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 grid grid-cols-3 gap-1 text-center text-xs font-semibold">
+          <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 grid grid-cols-2 gap-1 text-center text-xs font-semibold">
             <button
               onClick={() => { setCurrentView('landing'); setMobileMenuOpen(false); }}
               className={`py-2 rounded-lg ${currentView === 'landing' ? 'bg-cyan-600 text-white' : 'text-slate-400'}`}
@@ -218,13 +206,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="mobile-portal-participant-btn"
             >
               Participant
-            </button>
-            <button
-              onClick={() => { setCurrentView('admin'); setMobileMenuOpen(false); }}
-              className={`py-2 rounded-lg ${currentView === 'admin' ? 'bg-red-600 text-white' : 'text-slate-400'}`}
-              id="mobile-portal-admin-btn"
-            >
-              Admin
             </button>
           </div>
 

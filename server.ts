@@ -1270,6 +1270,15 @@ export async function startServer() {
     });
   });
 
+  // Return only the current session identity so the client can gate the admin view.
+  // Privileged API routes still enforce authorization independently with middleware.
+  app.get("/api/session", (req, res) => {
+    const session = getSessionFromRequest(req);
+    if (!session) return res.json({ authenticated: false });
+    const { id, type, role, teamId, email, username, name } = session.user;
+    res.json({ authenticated: true, user: { id, type, role, teamId, email, username, name } });
+  });
+
   // Gate Check-in / Venue Entry Endpoint for Admin Scanner
   app.post("/api/teams/:id/check-in", requireAdmin, (req, res) => {
     try {

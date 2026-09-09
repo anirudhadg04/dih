@@ -18,7 +18,15 @@ import { PortalView } from './types';
 import { Heart, Globe, ArrowUp } from 'lucide-react';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<PortalView>('landing');
+  const getViewFromPath = (path: string): PortalView => {
+    const normalizedPath = path.toLowerCase();
+    if (normalizedPath === '/admin') return 'admin';
+    if (normalizedPath === '/participant') return 'participant';
+    return 'landing';
+  };
+
+  const [currentView, setCurrentView] = useState<PortalView>(() => getViewFromPath(window.location.pathname));
+  const [adminSessionState, setAdminSessionState] = useState<'checking' | 'anonymous' | 'participant' | 'admin'>('checking');
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [isRulebookModalOpen, setIsRulebookModalOpen] = useState(false);
   const [liveStats, setLiveStats] = useState<{ registeredCount: number; collegesCount: number; seatsLeft: number; totalSeats: number } | undefined>(undefined);
@@ -28,6 +36,43 @@ export default function App() {
   }>({ hero: true, about: true, themes: true, schedule: true, prizes: true, sponsors: true, faq: true, contact: true });
   const [scrollProgress, setScrollProgress] = useState(0);
   const [showScrollTop, setShowScrollTop] = useState(false);
+
+  const navigateToView = (view: PortalView) => {
+    const path = view === 'admin' ? '/admin' : view === 'participant' ? '/participant' : '/';
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    setCurrentView(view);
+  };
+
+  useEffect(() => {
+    const handlePopState = () => setCurrentView(getViewFromPath(window.location.pathname));
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (currentView !== 'admin') {
+      setAdminSessionState('anonymous');
+      return;
+    }
+
+    let cancelled = false;
+    setAdminSessionState('checking');
+    fetch('/api/session')
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (!data.authenticated) setAdminSessionState('anonymous');
+        else if (data.user?.type === 'participant') setAdminSessionState('participant');
+        else if (data.user?.type === 'admin') setAdminSessionState('admin');
+        else setAdminSessionState('anonymous');
+      })
+      .catch(() => {
+        if (!cancelled) setAdminSessionState('anonymous');
+      });
+    return () => { cancelled = true; };
+  }, [currentView]);
 
   const fetchLiveStats = async () => {
     try {
@@ -94,6 +139,11 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const openRegistration = () => {
+    navigateToView('participant');
+    setIsRegisterModalOpen(true);
+  };
+
   return (
     <div className="min-h-screen bg-app text-app font-sans selection:bg-pink-500 selection:text-white relative">
       {/* Global Dynamic Cyber Atmosphere & Particle Aurora Background */}
@@ -111,8 +161,8 @@ export default function App() {
       {/* Primary Sticky Navbar */}
       <Navbar
         currentView={currentView}
-        setCurrentView={setCurrentView}
-        onOpenRegister={() => setIsRegisterModalOpen(true)}
+        setCurrentView={navigateToView}
+        onOpenRegister={openRegistration}
         onOpenRulebook={() => setIsRulebookModalOpen(true)}
       />
 
@@ -122,7 +172,7 @@ export default function App() {
           {homeSections.hero && (
             <>
               <Hero
-                onOpenRegister={() => setIsRegisterModalOpen(true)}
+                onOpenRegister={openRegistration}
                 onOpenRulebook={() => setIsRulebookModalOpen(true)}
                 liveStats={liveStats}
               />
@@ -131,7 +181,7 @@ export default function App() {
           )}
           {homeSections.themes && (
             <>
-              <ThemesSection onOpenRegister={() => setIsRegisterModalOpen(true)} />
+              <ThemesSection onOpenRegister={openRegistration} />
               <div className="cyber-section-divider" />
             </>
           )}
@@ -177,7 +227,19 @@ export default function App() {
 
       {currentView === 'admin' && (
         <div className="relative z-10">
-          <AdminPortal />
+          {adminSessionState === 'checking' ? (
+            <div className="min-h-[80vh] flex items-center justify-center text-cyan-300 font-mono text-sm">Checking admin session...</div>
+          ) : adminSessionState === 'participant' ? (
+            <div className="min-h-[80vh] flex items-center justify-center px-4">
+              <div className="max-w-md p-6 rounded-2xl bg-slate-900 border border-red-500/40 text-center space-y-3">
+                <h2 className="text-lg font-black text-white">Admin access denied</h2>
+                <p className="text-sm text-slate-300">Participant sessions cannot access the administrator portal.</p>
+                <button onClick={() => navigateToView('participant')} className="px-4 py-2 rounded-xl bg-cyan-600 text-white text-xs font-bold">Return to Participant Portal</button>
+              </div>
+            </div>
+          ) : (
+            <AdminPortal />
+          )}
         </div>
       )}
 
@@ -233,10 +295,9 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-6 font-semibold">
-            <button onClick={() => { setCurrentView('landing'); scrollToTop(); }} className="hover:text-pink-300 transition-colors">Home</button>
+            <button onClick={() => { navigateToView('landing'); scrollToTop(); }} className="hover:text-pink-300 transition-colors">Home</button>
             <button onClick={() => setIsRulebookModalOpen(true)} className="hover:text-orange-300 transition-colors">Rulebook PDF</button>
-            <button onClick={() => setCurrentView('participant')} className="hover:text-fuchsia-300 transition-colors">Participant Portal</button>
-            <button onClick={() => setCurrentView('admin')} className="hover:text-rose-400 transition-colors">Admin Portal</button>
+            <button onClick={() => navigateToView('participant')} className="hover:text-fuchsia-300 transition-colors">Participant Portal</button>
           </div>
 
           <div className="text-[11px] text-slate-500 space-y-1">

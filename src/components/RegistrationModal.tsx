@@ -267,7 +267,10 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       const totalFee = currentTotalFee;
       const res = await fetch('/api/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID()
+        },
         body: JSON.stringify({
           teamName: teamName || 'Anvation Innovators',
           preferredTrack,
@@ -338,12 +341,22 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
       } else {
         if (res.status === 409 || data.error === "duplicate_registration") {
+          const duplicateField = String(data.field || '').toLowerCase();
+          const duplicateMessage = duplicateField.includes('email')
+            ? 'This email is already registered.'
+            : duplicateField.includes('usn')
+              ? 'This USN is already registered.'
+              : duplicateField.includes('phone')
+                ? 'This phone number is already registered.'
+                : duplicateField === 'teamname'
+                  ? 'This team name is already registered.'
+                  : data.message || "This detail is already registered.";
           setDuplicateErrorInfo({
             isDuplicate: true,
             field: data.field,
-            message: data.message || "This detail is already registered."
+            message: duplicateMessage
           });
-          setPaymentFailError(data.message || "This detail is already registered with another team.");
+          setPaymentFailError(duplicateMessage);
         } else {
           setDuplicateErrorInfo(null);
           setPaymentFailError(data.error || "Registration could not be completed.");

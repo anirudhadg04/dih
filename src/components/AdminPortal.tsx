@@ -357,6 +357,7 @@ export const AdminPortal: React.FC = () => {
         setAdminEmail(identifier);
         setAuthError('');
         showToast(`✓ Admin session authenticated. Welcome, ${data.user?.name || ''}!`);
+        await fetchAdminData();
       } else {
         setAuthError(data.error || 'Invalid credentials. Please verify your admin identity.');
       }
