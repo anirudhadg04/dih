@@ -11,12 +11,12 @@
     color: var(--text-strong);
     font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     overflow-x: hidden;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
   }
 
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Space Grotesk', 'Outfit', sans-serif;
-    letter-spacing: -0.025em;
+    letter-spacing: 0;
   }
 
   .font-display {
@@ -220,18 +220,16 @@
 
 /* Glassmorphism Refined Cards */
 .glass-cyber-card {
-  background: rgba(5, 9, 22, 0.72);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(34, 211, 238, 0.2);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-  transition: all 0.3s ease;
+  background: var(--card-1);
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .glass-cyber-card:hover {
-  background: rgba(8, 14, 32, 0.86);
-  border-color: rgba(34, 211, 238, 0.5);
-  box-shadow: 0 16px 40px -10px rgba(34, 211, 238, 0.3);
+  background: var(--card-2);
+  border-color: var(--border-soft);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
 }
 
 /* Section Glowing Divider */
@@ -252,7 +250,17 @@
   height: 8px;
   background: #38bdf8;
   border-radius: 50%;
-  box-shadow: 0 0 12px #22d3ee, 0 0 24px #a855f7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Reference palette guardrails for legacy utility classes. */

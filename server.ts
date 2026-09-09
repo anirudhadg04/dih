@@ -333,6 +333,19 @@ export async function startServer() {
     return rest;
   }
 
+  function summarizeTeamForPublic(team: Team) {
+    return {
+      id: team.id,
+      regNumber: team.regNumber,
+      teamName: team.teamName,
+      preferredTrack: team.preferredTrack,
+      status: team.status,
+      createdAt: team.createdAt,
+      projectSubmitted: !!team.projectSubmitted,
+      memberCount: team.members.length,
+    };
+  }
+
   function normalizeStoredPassword(value?: string): string | undefined {
     if (!value) return undefined;
     const password = String(value).trim();
@@ -783,10 +796,17 @@ export async function startServer() {
     const totalCapacity = cmsConfig.maxRegistrations || 350;
     const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
 
-    const safeTeams = teams.map((team) => sanitizeTeamForClient(team));
+    const session = getSessionFromRequest(req)?.user;
+    const role = String(session?.role || "").toUpperCase();
+    const isStaff = ["ADMIN", "REGISTRATION_MANAGER", "CONTENT_MANAGER", "SUPER_ADMIN", "JUDGE", "CHECKIN_STAFF"].includes(role);
+    const visibleTeams = isStaff
+      ? teams.map((team) => sanitizeTeamForClient(team))
+      : session?.type === "participant" && session.teamId
+        ? teams.filter((team) => team.id.toLowerCase() === session.teamId!.toLowerCase()).map((team) => sanitizeTeamForClient(team))
+        : teams.map(summarizeTeamForPublic);
     res.json({
       success: true,
-      teams: safeTeams,
+      teams: visibleTeams,
       freezeRegistrations: !!cmsConfig.freezeRegistrations,
       registrationOpen: cmsConfig.registrationOpen && !cmsConfig.freezeRegistrations,
       stats: {

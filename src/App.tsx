@@ -12,7 +12,6 @@ import { RegistrationModal } from './components/RegistrationModal';
 import { RulebookModal } from './components/RulebookModal';
 import { ParticipantPortal } from './components/ParticipantPortal';
 import { AdminPortal } from './components/AdminPortal';
-import { CyberAtmosphereBackground } from './components/CyberAtmosphereBackground';
 import { COLLEGE_INFO, HACKATHON_SCHEDULE } from './data/mockData';
 import { PortalView } from './types';
 import { Heart, Globe, ArrowUp } from 'lucide-react';
@@ -96,11 +95,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-app text-app font-sans selection:bg-pink-500 selection:text-white relative">
-      {/* Global Dynamic Cyber Atmosphere & Particle Aurora Background */}
-      <CyberAtmosphereBackground />
-
-      
-
       {/* Top Reading Scroll Progress Indicator Bar */}
       <div 
         className="fixed top-0 left-0 h-1 bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-500 z-50 transition-all duration-150 shadow-[0_0_12px_rgba(236,72,153,0.8)]"
