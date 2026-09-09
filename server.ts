@@ -2656,6 +2656,10 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   return server;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const isDirectExecution = typeof __filename !== "undefined"
+  ? path.resolve(process.argv[1] || "") === path.resolve(__filename)
+  : Boolean(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href);
+
+if (isDirectExecution) {
   run();
 }
