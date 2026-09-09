@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { HACKATHON_TRACKS, COLLEGE_INFO } from '../data/mockData';
 import { drawQRCode, gateQrDataUrl } from '../utils/qr';
 import { printDocument } from '../utils/pdfGenerator';
-import { Rocket, CheckCircle2, User, Users, Shield, FileText, ArrowRight, Download, Sparkles, Edit3, Save, Plus, Trash2, X, AlertTriangle, Check, CreditCard, RefreshCw, Mail, Eye } from 'lucide-react';
+import { Rocket, CheckCircle2, User, Users, Shield, FileText, ArrowRight, Download, Sparkles, Edit3, Save, Plus, Trash2, X, AlertTriangle, Check, CreditCard, RefreshCw, Mail, Eye, Upload, Image as ImageIcon, Scan, CheckCircle } from 'lucide-react';
 import { PhonePeQRCode } from './PhonePeQRCode';
 import confetti from 'canvas-confetti';
 
@@ -48,6 +48,15 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   const [paymentUtr, setPaymentUtr] = useState('');
   const [paymentUtrConfirm, setPaymentUtrConfirm] = useState('');
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+
+  // Payment Screenshot & OCR Verification State
+  const [paymentScreenshotData, setPaymentScreenshotData] = useState<string | null>(null);
+  const [paymentScreenshotName, setPaymentScreenshotName] = useState<string>('');
+  const [paymentScreenshotSize, setPaymentScreenshotSize] = useState<string>('');
+  const [ocrStatus, setOcrStatus] = useState<'idle' | 'scanning' | 'matched' | 'mismatch' | 'error'>('idle');
+  const [ocrMessage, setOcrMessage] = useState<string | null>(null);
+  const [ocrCandidateUtrs, setOcrCandidateUtrs] = useState<string[]>([]);
+  const screenshotInputRef = useRef<HTMLInputElement | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Guards against duplicate submissions (double-click)
@@ -102,6 +111,13 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     setAccommodationRequired(true);
     setPaymentUtr('');
     setPaymentUtrConfirm('');
+    setPaymentScreenshotData(null);
+    setPaymentScreenshotName('');
+    setPaymentScreenshotSize('');
+    setOcrStatus('idle');
+    setOcrMessage(null);
+    setOcrCandidateUtrs([]);
+    if (screenshotInputRef.current) screenshotInputRef.current.value = '';
     setLeader({
       fullName: '',
       college: '',
@@ -171,6 +187,88 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   const participantCount = 1 + activeMembers.length;
   const currentTotalFee = participantCount * currentFeePerParticipant;
 
+  const handleScreenshotChange = (file: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload a valid image file (PNG, JPG, JPEG, WEBP).');
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      alert('Image file size exceeds 15 MB. Please upload a smaller image.');
+      return;
+    }
+
+    const sizeStr = file.size > 1024 * 1024
+      ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+      : `${(file.size / 1024).toFixed(0)} KB`;
+    setPaymentScreenshotName(file.name);
+    setPaymentScreenshotSize(sizeStr);
+    setOcrStatus('idle');
+    setOcrMessage(null);
+    setPaymentVerifiedSuccess(false);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      setPaymentScreenshotData(dataUrl);
+      handleVerifyPaymentWithOcr(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleVerifyPaymentWithOcr = async (overrideDataUrl?: string) => {
+    const dataUrl = overrideDataUrl || paymentScreenshotData;
+    if (!dataUrl) {
+      alert('Please upload a payment screenshot first.');
+      return;
+    }
+
+    setOcrStatus('scanning');
+    setOcrMessage('Scanning receipt with AI OCR to match UTR...');
+    setPaymentVerifying(true);
+
+    try {
+      const res = await fetch('/api/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: dataUrl,
+          paymentUtr: paymentUtr.trim() || undefined
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setOcrStatus('error');
+        setOcrMessage(data.error || 'Failed to scan payment screenshot.');
+        return;
+      }
+
+      setOcrCandidateUtrs(data.candidateUtrs || []);
+
+      if (data.verified) {
+        setOcrStatus('matched');
+        const matched = data.matchedUtr || data.detectedUtr;
+        setOcrMessage(data.message || `Screenshot verified! Matched UTR: ${matched}`);
+        setPaymentVerifiedSuccess(true);
+        if (!paymentUtr && data.detectedUtr) {
+          setPaymentUtr(data.detectedUtr);
+          setPaymentUtrConfirm(data.detectedUtr);
+        }
+      } else {
+        setOcrStatus('mismatch');
+        setOcrMessage(data.error || 'The entered UTR was not detected in the uploaded screenshot. Please check the receipt.');
+        setPaymentVerifiedSuccess(false);
+      }
+    } catch (err: any) {
+      console.error('OCR Verification error:', err);
+      setOcrStatus('error');
+      setOcrMessage(err.message || 'OCR verification service network error.');
+    } finally {
+      setPaymentVerifying(false);
+    }
+  };
+
   const handleSubmitRegistration = async () => {
     // Double-submission lock: prevents rapid double-clicks
     if (submittingRef.current || loading) return;
@@ -190,15 +288,21 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       return;
     }
 
-    const utrPattern = /^[A-Za-z0-9]{12,22}$/;
+    const utrPattern = /^[A-Za-z0-9]{12,30}$/;
     if (!utrPattern.test(utr1) || !utrPattern.test(utr2)) {
-      setPaymentFailError("Invalid UTR format. The transaction ID must be 12 to 22 alphanumeric characters.");
+      setPaymentFailError("Invalid UTR format. The transaction ID must be 12 to 30 alphanumeric characters.");
       setShowPaymentFailModal(true);
       return;
     }
 
     if (utr1.toUpperCase() !== utr2.toUpperCase()) {
       setPaymentFailError("The two UPI Transaction IDs do not match. Please verify your transaction receipt and re-enter.");
+      setShowPaymentFailModal(true);
+      return;
+    }
+
+    if (!paymentScreenshotData) {
+      setPaymentFailError("Please upload your payment receipt screenshot to complete verification.");
       setShowPaymentFailModal(true);
       return;
     }
@@ -229,7 +333,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
           leader,
           members: activeMembers,
           paymentUtr: utr1.toUpperCase(),
-          paymentUtrConfirm: utr2.toUpperCase()
+          paymentUtrConfirm: utr2.toUpperCase(),
+          paymentScreenshot: paymentScreenshotData
         })
       });
 
@@ -723,7 +828,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                   </label>
                   <input
                     type="text"
-                    maxLength={22}
+                    maxLength={30}
                     value={paymentUtr}
                     onChange={(e) => {
                       const val = e.target.value.trim();
@@ -747,7 +852,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                   </label>
                   <input
                     type="text"
-                    maxLength={22}
+                    maxLength={30}
                     value={paymentUtrConfirm}
                     onChange={(e) => {
                       const val = e.target.value.trim();
@@ -776,6 +881,150 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                     </p>
                   )}
                 </div>
+
+                {/* Screenshot Upload & OCR Section */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Payment Screenshot Proof <span className="text-red-400 font-black">*</span></span>
+                    </label>
+                    <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-800">
+                      OCR Verification
+                    </span>
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={screenshotInputRef}
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) {
+                        handleScreenshotChange(e.target.files[0]);
+                      }
+                    }}
+                  />
+
+                  {!paymentScreenshotData ? (
+                    <div
+                      onClick={() => screenshotInputRef.current?.click()}
+                      className="border-2 border-dashed border-indigo-500/40 hover:border-indigo-400 bg-indigo-950/20 hover:bg-indigo-950/40 rounded-xl p-3 text-center cursor-pointer transition-all space-y-1.5 group"
+                    >
+                      <div className="w-8 h-8 mx-auto rounded-full bg-indigo-900/60 border border-indigo-500/40 flex items-center justify-center text-indigo-300 group-hover:scale-110 transition-transform">
+                        <Upload className="w-4 h-4" />
+                      </div>
+                      <div className="text-xs font-bold text-white">Click to upload PhonePe / GPay / Paytm receipt</div>
+                      <p className="text-[10px] text-slate-400">PNG, JPG, WEBP up to 15MB • Automatic OCR matching</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-950 border border-indigo-500/30">
+                        <img
+                          src={paymentScreenshotData}
+                          alt="Payment Receipt"
+                          className="w-14 h-14 object-cover rounded-lg border border-slate-700 bg-black shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-bold text-white truncate">{paymentScreenshotName || 'payment_receipt.jpg'}</div>
+                          <div className="text-[10px] text-slate-400">{paymentScreenshotSize || 'Attached'}</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => screenshotInputRef.current?.click()}
+                              className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold underline"
+                            >
+                              Change
+                            </button>
+                            <span className="text-slate-600">•</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPaymentScreenshotData(null);
+                                setPaymentScreenshotName('');
+                                setPaymentScreenshotSize('');
+                                setOcrStatus('idle');
+                                setOcrMessage(null);
+                                setOcrCandidateUtrs([]);
+                                if (screenshotInputRef.current) screenshotInputRef.current.value = '';
+                              }}
+                              className="text-[10px] text-red-400 hover:text-red-300 font-bold"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+
+                        {ocrStatus !== 'scanning' && (
+                          <button
+                            type="button"
+                            onClick={() => handleVerifyPaymentWithOcr()}
+                            className="px-2.5 py-1.5 rounded-lg bg-indigo-900 hover:bg-indigo-800 text-indigo-200 border border-indigo-600 text-[10px] font-bold shrink-0 flex items-center gap-1"
+                          >
+                            <Scan className="w-3 h-3" />
+                            <span>Scan OCR</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* OCR Status Messages */}
+                      {ocrStatus === 'scanning' && (
+                        <div className="p-2.5 rounded-xl bg-indigo-950/60 border border-indigo-500/40 text-xs text-indigo-200 flex items-center gap-2 animate-pulse">
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                          <span>Scanning receipt with AI OCR to verify UTR...</span>
+                        </div>
+                      )}
+
+                      {ocrStatus === 'matched' && (
+                        <div className="p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-xs text-emerald-300 flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <div className="leading-tight">
+                            <div className="font-bold">OCR Receipt Verified!</div>
+                            <div className="text-[10px] text-emerald-200/80">{ocrMessage}</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {ocrStatus === 'mismatch' && (
+                        <div className="p-2.5 rounded-xl bg-amber-950/60 border border-amber-500/50 text-xs text-amber-300 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span className="font-bold text-[11px]">UTR Mismatch / Unverified</span>
+                          </div>
+                          <p className="text-[10px] text-amber-200/90 leading-relaxed">{ocrMessage}</p>
+                          {ocrCandidateUtrs.length > 0 && (
+                            <div className="pt-1 border-t border-amber-800/40">
+                              <span className="text-[10px] text-amber-300 font-bold block mb-1">Detected references in receipt:</span>
+                              <div className="flex flex-wrap gap-1">
+                                {ocrCandidateUtrs.map((cand, ci) => (
+                                  <button
+                                    key={ci}
+                                    type="button"
+                                    onClick={() => {
+                                      setPaymentUtr(cand);
+                                      setPaymentUtrConfirm(cand);
+                                      handleVerifyPaymentWithOcr();
+                                    }}
+                                    className="px-2 py-0.5 rounded bg-amber-900/70 hover:bg-amber-800 border border-amber-600 text-[10px] font-mono font-bold text-amber-100"
+                                  >
+                                    Use {cand}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {ocrStatus === 'error' && (
+                        <div className="p-2.5 rounded-xl bg-red-950/60 border border-red-500/50 text-xs text-red-300 flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                          <span className="text-[10px]">{ocrMessage}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -784,7 +1033,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 Back
               </button>
               <button
-                disabled={loading || !paymentUtr || !paymentUtrConfirm || paymentUtr.toUpperCase() !== paymentUtrConfirm.toUpperCase()}
+                disabled={loading || !paymentScreenshotData || !paymentUtr || !paymentUtrConfirm || paymentUtr.toUpperCase() !== paymentUtrConfirm.toUpperCase()}
                 onClick={() => handleSubmitRegistration()}
                 className="flex-1 py-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-600 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-slate-950 font-black text-xs sm:text-sm shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
                 id="reg-step4-next-btn"

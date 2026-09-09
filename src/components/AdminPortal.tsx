@@ -195,6 +195,7 @@ export const AdminPortal: React.FC = () => {
   const [selectedParticipantModal, setSelectedParticipantModal] = useState<Participant | null>(null);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [isEditTeamModalOpen, setIsEditTeamModalOpen] = useState(false);
+  const [viewingProofTeam, setViewingProofTeam] = useState<Team | null>(null);
   const [scoreOverrideModal, setScoreOverrideModal] = useState<{ open: boolean; submissionId: string; currentScore: number; reason: string }>({
     open: false,
     submissionId: '',
@@ -1845,8 +1846,20 @@ export const AdminPortal: React.FC = () => {
                       <div className="text-slate-300">Track: <span className="text-purple-300 font-bold">{t.preferredTrack}</span></div>
                       <div className="text-slate-400 text-[11px]">Leader Email: {t.leaderEmail}</div>
                       <div className="text-slate-400 text-[11px]">Members Count: {t.members.length} Hacker(s)</div>
-                      <div className="text-slate-400 text-[11px] flex items-center gap-1">Portal Password: <span className="text-purple-300 font-mono font-bold bg-purple-950/50 px-1.5 py-0.5 rounded border border-purple-800/60">{t.accessPassword || 'CODE2026#XXXX'}</span></div>
-                      <div className="text-slate-400 text-[11px]">Payment: <span className={t.paymentStatus === 'Verified' ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{t.paymentStatus || 'Verified'}</span> (UTR: {t.paymentUtr || 'N/A'})</div>
+                      <div className="text-slate-400 text-[11px] flex items-center justify-between">
+                        <span>Payment: <span className={t.paymentStatus === 'Verified' ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{t.paymentStatus || 'Verified'}</span> (UTR: {t.paymentUtr || 'N/A'})</span>
+                        {t.paymentScreenshot && (
+                          <button
+                            type="button"
+                            onClick={() => setViewingProofTeam(t)}
+                            className="px-2 py-0.5 rounded bg-indigo-950 hover:bg-indigo-900 border border-indigo-700/60 text-indigo-300 text-[10px] font-bold inline-flex items-center gap-1 shadow-sm"
+                            title="View Uploaded Payment Proof Screenshot"
+                          >
+                            <Eye className="w-3 h-3 text-indigo-400" />
+                            <span>Proof</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-900">
@@ -3353,6 +3366,7 @@ export const AdminPortal: React.FC = () => {
                         <th className="p-3">Leader Email</th>
                         <th className="p-3">Amount</th>
                         <th className="p-3">UTR Reference No</th>
+                        <th className="p-3">Proof Screenshot</th>
                         <th className="p-3">Status</th>
                         <th className="p-3">Action</th>
                       </tr>
@@ -3367,6 +3381,20 @@ export const AdminPortal: React.FC = () => {
                           <td className="p-3 text-slate-300 text-[11px]">{t.leaderEmail}</td>
                           <td className="p-3 font-mono font-bold text-emerald-400">₹{t.members.length * (cmsConfig.registrationFee || 1)}</td>
                           <td className="p-3 font-mono text-amber-300 font-bold">{t.paymentUtr || 'N/A'}</td>
+                          <td className="p-3">
+                            {t.paymentScreenshot ? (
+                              <button
+                                type="button"
+                                onClick={() => setViewingProofTeam(t)}
+                                className="px-2.5 py-1 rounded-lg bg-indigo-950 hover:bg-indigo-900 border border-indigo-700/60 text-indigo-300 font-bold text-[10px] flex items-center gap-1.5 shadow-sm transition-colors"
+                              >
+                                <Eye className="w-3 h-3 text-indigo-400" />
+                                <span>View Proof</span>
+                              </button>
+                            ) : (
+                              <span className="text-slate-500 font-mono text-[10px]">No file</span>
+                            )}
+                          </td>
                           <td className="p-3">
                             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
                               t.paymentStatus === 'Verified' ? 'bg-emerald-950 text-emerald-400 border-emerald-800' :
@@ -3896,6 +3924,96 @@ export const AdminPortal: React.FC = () => {
                 className="px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 text-xs font-bold"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PAYMENT SCREENSHOT PROOF MODAL */}
+      {viewingProofTeam && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-indigo-500/50 w-full max-w-2xl rounded-3xl p-6 space-y-4 shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-black text-white flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-indigo-400" /> Payment Screenshot Proof
+                </h3>
+                <p className="text-xs text-slate-400">Team: <strong className="text-white">{viewingProofTeam.teamName}</strong> ({viewingProofTeam.id}) • Leader: {viewingProofTeam.leaderEmail}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingProofTeam(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">Entered UTR</span>
+                <span className="text-amber-300 font-mono font-bold">{viewingProofTeam.paymentUtr || 'N/A'}</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">Amount</span>
+                <span className="text-emerald-400 font-bold">₹{viewingProofTeam.members.length * (cmsConfig.registrationFee || 1)}</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">Team Size</span>
+                <span className="text-white font-bold">{viewingProofTeam.members.length} Hackers</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">Status</span>
+                <span className={viewingProofTeam.paymentStatus === 'Verified' ? 'text-emerald-400 font-bold' : 'text-amber-300 font-bold'}>
+                  {viewingProofTeam.paymentStatus || 'Pending'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto min-h-[250px] max-h-[450px] rounded-2xl bg-black border border-slate-800 flex items-center justify-center p-2">
+              {viewingProofTeam.paymentScreenshot ? (
+                <img
+                  src={viewingProofTeam.paymentScreenshot}
+                  alt="Uploaded Payment Screenshot Proof"
+                  className="max-h-[430px] w-auto max-w-full object-contain rounded-lg"
+                />
+              ) : (
+                <div className="text-slate-500 text-xs">No screenshot image recorded for this team.</div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-800">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleVerifyUTR(viewingProofTeam.id, 'Verified');
+                    setViewingProofTeam({ ...viewingProofTeam, paymentStatus: 'Verified' });
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Approve Payment</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleVerifyUTR(viewingProofTeam.id, 'Rejected');
+                    setViewingProofTeam({ ...viewingProofTeam, paymentStatus: 'Rejected' });
+                  }}
+                  className="px-4 py-2 rounded-xl bg-red-950 hover:bg-red-900 border border-red-800 text-red-300 font-bold text-xs flex items-center gap-1.5"
+                >
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Reject Payment</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingProofTeam(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+              >
+                Close
               </button>
             </div>
           </div>

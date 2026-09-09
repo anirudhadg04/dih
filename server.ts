@@ -275,8 +275,9 @@ export async function startServer() {
   const app = express();
   const requestedPort = PUBLIC_PORT;
 
-  // Hardened payload limit (256kb) to prevent DoS via large JSON payloads.
-  app.use(express.json({ limit: "256kb" }));
+  // Payload limit (16mb) to support base64 payment receipt screenshot uploads.
+  app.use(express.json({ limit: "16mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "16mb" }));
 
   // =============================================================
   // Production hardening / reliability middleware
@@ -480,7 +481,8 @@ export async function startServer() {
     "/api/send-registration-email",
     "/api/registration/:teamId/deliver-credentials",
     "/api/registration/:teamId/deliver-credentials/retry",
-    "/api/finance/verify-utr"
+    "/api/finance/verify-utr",
+    "/api/verify-payment"
   ], authLimiter);
 
   // Dedicated registration throttle (60 registrations / min per IP)
@@ -748,6 +750,130 @@ export async function startServer() {
     next();
   });
 
+  // =============================================================
+  // Tesseract OCR Payment Proof Verification Engine
+  // =============================================================
+  let ocrWorkerInstance: any = null;
+  let ocrWorkerInitializing: Promise<any> | null = null;
+
+  async function getOcrWorker() {
+    if (ocrWorkerInstance) return ocrWorkerInstance;
+    if (ocrWorkerInitializing) return ocrWorkerInitializing;
+    ocrWorkerInitializing = (async () => {
+      try {
+        const { createWorker } = await import("tesseract.js");
+        const worker = await createWorker("eng");
+        ocrWorkerInstance = worker;
+        return worker;
+      } catch (err) {
+        ocrWorkerInitializing = null;
+        throw err;
+      }
+    })();
+    return ocrWorkerInitializing;
+  }
+
+  // Payment Screenshot OCR Verification Endpoint
+  app.post("/api/verify-payment", async (req, res) => {
+    try {
+      const { image, paymentUtr } = req.body || {};
+      if (!image || typeof image !== "string" || !image.trim()) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Payment screenshot image is required."
+        });
+      }
+
+      // Decode base64 image data (handles data URL prefixes like data:image/jpeg;base64,...)
+      let base64Data = image.trim();
+      if (base64Data.includes(",")) {
+        base64Data = base64Data.split(",")[1];
+      }
+      const buffer = Buffer.from(base64Data, "base64");
+      if (buffer.length === 0 || buffer.length > 15 * 1024 * 1024) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Image size must be between 1 KB and 15 MB."
+        });
+      }
+
+      // Verify magic bytes (JPEG, PNG, WEBP, GIF)
+      const isJpeg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+      const isPng = buffer.length > 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+      const isWebp = buffer.length > 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP";
+      const isGif = buffer.length > 3 && buffer.toString("ascii", 0, 3) === "GIF";
+
+      if (!isJpeg && !isPng && !isWebp && !isGif) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Invalid image format. Supported formats: JPEG, PNG, WEBP, GIF."
+        });
+      }
+
+      const worker = await getOcrWorker();
+      const ocrResult = await worker.recognize(buffer);
+      const rawText = ocrResult?.data?.text || "";
+      const compactText = rawText.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+      // Extract candidate 12-digit UTRs and alphanumeric transaction IDs
+      const utrMatches = rawText.match(/\b\d{12}\b/g) || [];
+      const txnMatches = rawText.match(/\bT[0-9]{18,24}\b/gi) || [];
+      const allCandidateUtrs = Array.from(new Set([...utrMatches, ...txnMatches]));
+
+      // Check beneficiary keywords
+      const beneficiaryKeywords = ["kgsoumya1605", "okicici", "manjunatha", "manjunath", "kssem", "anvation"];
+      const beneficiaryFound = beneficiaryKeywords.some(kw => compactText.includes(kw));
+
+      if (paymentUtr && typeof paymentUtr === "string" && paymentUtr.trim()) {
+        const cleanInput = paymentUtr.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+        const matched = compactText.includes(cleanInput);
+
+        if (matched) {
+          return res.json({
+            success: true,
+            verified: true,
+            matchedUtr: paymentUtr.trim(),
+            candidateUtrs: allCandidateUtrs,
+            beneficiaryFound,
+            message: `Payment screenshot verified successfully! Reference "${paymentUtr.trim()}" matched in receipt.`
+          });
+        } else {
+          return res.json({
+            success: true,
+            verified: false,
+            matchedUtr: null,
+            candidateUtrs: allCandidateUtrs,
+            beneficiaryFound,
+            error: `Entered reference "${paymentUtr.trim()}" was not detected in the screenshot. Detected references: ${allCandidateUtrs.length > 0 ? allCandidateUtrs.join(", ") : "None"}. Please verify your typed UTR or upload a clearer screenshot.`
+          });
+        }
+      }
+
+      // If no UTR was passed, return detected candidate references
+      return res.json({
+        success: true,
+        verified: allCandidateUtrs.length > 0,
+        detectedUtr: allCandidateUtrs[0] || null,
+        candidateUtrs: allCandidateUtrs,
+        beneficiaryFound,
+        message: allCandidateUtrs.length > 0 ? `Detected reference: ${allCandidateUtrs[0]}` : "No 12-digit UTR detected in screenshot."
+      });
+    } catch (err: any) {
+      console.error("[OCR ERROR]", err);
+      // Reset worker if an unrecoverable failure occurred
+      ocrWorkerInstance = null;
+      ocrWorkerInitializing = null;
+      return res.status(500).json({
+        success: false,
+        verified: false,
+        error: "Failed to process screenshot OCR: " + (err.message || "Internal error")
+      });
+    }
+  });
+
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -936,9 +1062,9 @@ export async function startServer() {
     if (/\s/.test(clean) || /[@./\\]/.test(clean)) {
       return { valid: false, error: "Invalid UTR format. UTR must be an alphanumeric transaction reference (letters and numbers only, no spaces or special characters)." };
     }
-    const utrRegex = /^[A-Z0-9]{12,22}$/;
+    const utrRegex = /^[A-Z0-9]{12,30}$/;
     if (!utrRegex.test(clean)) {
-      return { valid: false, error: "Invalid UTR length. Transaction reference must be between 12 and 22 alphanumeric characters." };
+      return { valid: false, error: "Invalid UTR length. Transaction reference must be between 12 and 30 alphanumeric characters." };
     }
     const duplicate = teams.find(t => t.paymentUtr && t.paymentUtr.trim().toUpperCase() === clean);
     if (duplicate) {
@@ -1249,7 +1375,7 @@ Present your Gate Entry Pass QR code at the entrance desk.`;
           return { status: 400, body: { success: false, error: teamValidation.error } };
         }
 
-        const { teamName, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentUtrConfirm } = req.body;
+        const { teamName, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentUtrConfirm, paymentScreenshot } = req.body;
 
         const utrValidation = validatePaymentUtr(paymentUtr, paymentUtrConfirm);
         if (!utrValidation.valid) {
@@ -1322,6 +1448,7 @@ Present your Gate Entry Pass QR code at the entrance desk.`;
           projectSubmitted: false,
           paymentUtr: cleanUtr,
           paymentStatus: 'Verified',
+          paymentScreenshot: typeof paymentScreenshot === "string" && paymentScreenshot.trim() ? paymentScreenshot.trim() : null,
           credentialDeliveryStatus: 'queued'
         };
 
@@ -1923,11 +2050,11 @@ Present your Gate Entry Pass QR code at the entrance desk.`;
         }));
       }
       if (Array.isArray(saved.adminUsers)) {
-        const savedMap = new Map(saved.adminUsers.map((u: any) => [u.id, u]));
+        const savedMap = new Map<string, any>(saved.adminUsers.map((u: any) => [u.id, u]));
         const mergedUsers: AdminUser[] = [];
         for (const defaultUser of adminUsers) {
           if (savedMap.has(defaultUser.id)) {
-            const savedU = savedMap.get(defaultUser.id);
+            const savedU: any = savedMap.get(defaultUser.id);
             mergedUsers.push({
               ...savedU,
               password: normalizeStoredPassword(savedU.password || DEFAULT_ADMIN_PASSWORD)
@@ -1937,7 +2064,7 @@ Present your Gate Entry Pass QR code at the entrance desk.`;
             mergedUsers.push(defaultUser);
           }
         }
-        for (const customUser of savedMap.values()) {
+        for (const customUser of Array.from(savedMap.values())) {
           mergedUsers.push({
             ...customUser,
             password: normalizeStoredPassword(customUser.password || DEFAULT_ADMIN_PASSWORD)
