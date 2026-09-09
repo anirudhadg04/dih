@@ -14,7 +14,7 @@ import rateLimit from "express-rate-limit";
 import { createWorker } from "tesseract.js";
 import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
-import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
+import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 
 const execFileAsync = promisify(execFile);
 
@@ -476,11 +476,17 @@ export async function startServer() {
     return `pbkdf2_sha256$${salt}$${derived}`;
   }
 
+  function generatePortalPassword(): string {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    const groups = Array.from({ length: 3 }, () =>
+      Array.from({ length: 4 }, () => alphabet[crypto.randomInt(0, alphabet.length)]).join("")
+    );
+    return groups.join("-");
+  }
+
   function verifyPassword(password: string, storedHash?: string): boolean {
     if (!storedHash || !password) return false;
-    if (!storedHash.startsWith("pbkdf2_sha256$")) {
-      return storedHash === password;
-    }
+    if (!storedHash.startsWith("pbkdf2_sha256$")) return false;
     const [, salt, hash] = storedHash.split("$");
     if (!salt || !hash) return false;
     const derived = crypto.pbkdf2Sync(password, salt, 250000, 32, "sha256").toString("hex");
@@ -1471,7 +1477,7 @@ export async function startServer() {
           foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
         }));
 
-        const accessPassword = `CODE2026#${Math.floor(1000 + Math.random() * 9000)}`;
+        const accessPassword = generatePortalPassword();
 
         const newTeam: Team = {
           id: teamId,
@@ -1919,6 +1925,60 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     }
   });
 
+  // Reissue a participant portal password without exposing or persisting the plaintext value.
+  app.post("/api/admin/teams/:teamId/reset-password", requireRole(["ADMIN", "REGISTRATION_MANAGER", "SUPER_ADMIN"]), (req, res) => {
+    const teamId = String(req.params.teamId || "").trim();
+    const index = teams.findIndex((team) =>
+      team.id.toLowerCase() === teamId.toLowerCase() || team.regNumber.toLowerCase() === teamId.toLowerCase()
+    );
+
+    if (index === -1) {
+      return res.status(404).json({ success: false, error: "Team not found." });
+    }
+
+    const previousTeam = teams[index];
+    const temporaryPassword = generatePortalPassword();
+    teams[index] = { ...previousTeam, accessPassword: hashPassword(temporaryPassword) };
+
+    try {
+      rebuildUniquenessIndexes();
+      if (!persistNow()) {
+        teams[index] = previousTeam;
+        rebuildUniquenessIndexes();
+        return res.status(500).json({ success: false, error: "Password reset could not be persisted." });
+      }
+
+      for (const [sessionId, session] of sessionStore.entries()) {
+        if (session.user.type === "participant" && session.user.teamId === previousTeam.id) {
+          sessionStore.delete(sessionId);
+        }
+      }
+
+      auditLogs.unshift({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actorEmail: req.session?.email || req.session?.username || "unknown-admin",
+        actorRole: (req.session?.role || "ADMIN") as AdminRole,
+        action: "participant_password_reset",
+        target: previousTeam.id,
+        reason: "Portal password reissued by authorized administrator.",
+        ipAddress: getClientIp(req)
+      });
+      persistNow();
+
+      return res.json({
+        success: true,
+        message: "Portal password reset successfully.",
+        participantId: previousTeam.id,
+        temporaryPassword
+      });
+    } catch (error) {
+      teams[index] = previousTeam;
+      rebuildUniquenessIndexes();
+      return res.status(500).json({ success: false, error: "Password reset failed." });
+    }
+  });
+
   // Delete Team Endpoint
   app.delete("/api/teams/:id", requireSuperAdmin, (req, res) => {
     const { id } = req.params;
@@ -2313,6 +2373,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         adminUsers = mergedUsers;
       }
       if (Array.isArray(saved.checkpoints)) checkpoints = saved.checkpoints;
+      if (Array.isArray(saved.auditLogs)) auditLogs = saved.auditLogs;
       if (typeof saved.nextTeamNumber === "number") nextTeamNumber = saved.nextTeamNumber;
       rebuildUniquenessIndexes();
     } catch (e) {
@@ -2320,7 +2381,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     }
   };
 
-  const persistNow = () => {
+  const persistNow = (): boolean => {
     try {
       // Write atomically: dump to a temp file first, then rename over the real
       // file. This guarantees server-data.json is never left half-written if the
@@ -2335,12 +2396,14 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         ...user,
         password: normalizeStoredPassword(user.password)
       }));
-      const payload = JSON.stringify({ teams: sanitizedTeams, adminUsers: normalizedAdminUsers, checkpoints, nextTeamNumber }, null, 2);
+      const payload = JSON.stringify({ teams: sanitizedTeams, adminUsers: normalizedAdminUsers, checkpoints, auditLogs, nextTeamNumber }, null, 2);
       const tmpFile = `${DATA_FILE}.tmp`;
       fs.writeFileSync(tmpFile, payload, "utf-8");
       fs.renameSync(tmpFile, DATA_FILE);
+      return true;
     } catch (e) {
       console.warn("Failed to persist records:", e);
+      return false;
     }
   };
 

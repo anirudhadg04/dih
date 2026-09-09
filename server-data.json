@@ -584,5 +584,31 @@
       "status": "Open"
     }
   ],
+  "auditLogs": [
+    {
+      "id": "log-101",
+      "timestamp": "2026-09-09T14:36:57.615Z",
+      "actorEmail": "superadmin@kssem.edu.in",
+      "actorRole": "SUPER_ADMIN",
+      "action": "CMS Config Update",
+      "target": "Website CMS Settings",
+      "beforeValue": "Registration Open = true",
+      "afterValue": "Total Prize Pool = ₹2,00,000+",
+      "reason": "Super Admin updated prize pool details",
+      "ipAddress": "192.168.1.10"
+    },
+    {
+      "id": "log-102",
+      "timestamp": "2026-09-09T13:36:57.616Z",
+      "actorEmail": "superadmin@kssem.edu.in",
+      "actorRole": "SUPER_ADMIN",
+      "action": "Checkpoint Approved",
+      "target": "Team Neural Ninjas (CT-101)",
+      "beforeValue": "Pending",
+      "afterValue": "Approved",
+      "reason": "Review completed by Jury Panel",
+      "ipAddress": "192.168.1.10"
+    }
+  ],
   "nextTeamNumber": 13
 }

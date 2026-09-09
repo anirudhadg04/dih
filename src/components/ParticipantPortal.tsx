@@ -312,14 +312,14 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
           AUTO-ASSIGNED TEAM ID: ${currentTeam.id}
         </div>
         <div style="background: #7e22ce; color: #ffffff; display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-family: monospace;">
-          ACCESS PASSWORD: ${currentTeam.accessPassword || 'CODE2026#9841'}
+          ACCESS PASSWORD: Stored securely; use the password from your registration confirmation.
         </div>
       </div>
 
       <table>
         <tr><th>Registration No</th><td>${currentTeam.regNumber}</td></tr>
         <tr><th>Auto-Assigned Team ID</th><td><strong style="color: #0284c7; font-family: monospace;">${currentTeam.id}</strong></td></tr>
-        <tr><th>Portal Access Password</th><td><strong style="color: #7e22ce; font-family: monospace;">${currentTeam.accessPassword || 'CODE2026#9841'}</strong></td></tr>
+        <tr><th>Portal Access Password</th><td><strong style="color: #7e22ce; font-family: monospace;">Stored securely; use the password from your registration confirmation.</strong></td></tr>
         <tr><th>Team Name</th><td><strong>${currentTeam.teamName}</strong></td></tr>
         <tr><th>Preferred Track</th><td>${currentTeam.preferredTrack}</td></tr>
         <tr><th>Payment Status</th><td>${currentTeam.paymentStatus || 'Verified'} (UTR: ${currentTeam.paymentUtr || 'PhonePe Verified'})</td></tr>
@@ -332,7 +332,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
       </table>
 
       <div style="margin-top: 15px; padding: 12px; border: 1px dashed #7e22ce; border-radius: 8px; background: #faf5ff; font-size: 12px; color: #581c87;">
-        <strong>🔐 Dashboard Login Credentials:</strong> Use your <strong>Auto-Assigned Team ID (${currentTeam.id})</strong> and <strong>Password (${currentTeam.accessPassword || 'CODE2026#9841'})</strong> or Leader Email to login to the Participant Portal.
+        <strong>🔐 Dashboard Login Credentials:</strong> Use your <strong>Auto-Assigned Team ID (${currentTeam.id})</strong> and the password from your registration confirmation, or Leader Email, to login to the Participant Portal.
       </div>
 
       <div class="qr-box" style="margin-top: 25px; text-align: center;">
@@ -675,7 +675,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
 
                 <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
                   <div className="flex justify-between items-center"><span className="text-slate-400">Auto Team ID:</span> <span className="text-cyan-400 font-mono font-bold bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">{currentTeam.id}</span></div>
-                  <div className="flex justify-between items-center"><span className="text-slate-400">Access Password:</span> <span className="text-purple-300 font-mono font-bold bg-purple-950/80 px-2 py-0.5 rounded border border-purple-800">{currentTeam.accessPassword || 'CODE2026#9841'}</span></div>
+                  <div className="flex justify-between items-center"><span className="text-slate-400">Access Password:</span> <span className="text-emerald-300 font-mono font-bold">Stored securely</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Team:</span> <span className="text-white font-bold">{currentTeam.teamName}</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Leader Email:</span> <span className="text-slate-300 font-mono">{currentTeam.leaderEmail}</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Track:</span> <span className="text-purple-300 font-bold">{currentTeam.preferredTrack}</span></div>

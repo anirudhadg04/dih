@@ -282,8 +282,9 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
       const data = await res.json();
       if (data.success && data.team) {
-        setRegisteredTeam(data.team);
-        onSuccess(data.team);
+        const registrationTeam = { ...data.team, accessPassword: data.accessPassword };
+        setRegisteredTeam(registrationTeam);
+        onSuccess(registrationTeam);
 
         // Gather all participant emails
         const allEmails = [
@@ -303,7 +304,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               emails: allEmails,
               teamName: data.team.teamName,
               track: data.team.preferredTrack,
-              password: data.team.accessPassword,
+              password: data.accessPassword,
               regNumber: data.team.regNumber,
               participants: [
                 { email: leader.email, name: leader.fullName, college: leader.college, role: 'Leader' },
@@ -507,7 +508,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
           AUTO-ASSIGNED TEAM ID: ${registeredTeam.id}
         </div>
         <div style="background: #7e22ce; color: #ffffff; display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-family: monospace;">
-          ACCESS PASSWORD: ${registeredTeam.accessPassword || 'CODE2026#9841'}
+          ACCESS PASSWORD: ${registeredTeam.accessPassword || 'Unavailable - request an admin reset'}
         </div>
         <div style="background: #059669; color: #ffffff; display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-family: monospace; margin-top: 8px;">
           VENUE ENTRY PASS: Gate scanner ready at KSSEM campus
@@ -517,7 +518,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       <table>
         <tr><th>Registration No</th><td>${registeredTeam.regNumber}</td></tr>
         <tr><th>Auto-Assigned Team ID</th><td><strong style="color: #0284c7; font-family: monospace;">${registeredTeam.id}</strong></td></tr>
-        <tr><th>Portal Access Password</th><td><strong style="color: #7e22ce; font-family: monospace;">${registeredTeam.accessPassword || 'CODE2026#9841'}</strong></td></tr>
+        <tr><th>Portal Access Password</th><td><strong style="color: #7e22ce; font-family: monospace;">${registeredTeam.accessPassword || 'Unavailable - request an admin reset'}</strong></td></tr>
         <tr><th>Team Name</th><td><strong>${registeredTeam.teamName}</strong></td></tr>
         <tr><th>Preferred Track</th><td>${registeredTeam.preferredTrack}</td></tr>
         <tr><th>Payment UTR Ref</th><td>${registeredTeam.paymentUtr || 'Verified (PhonePe)'}</td></tr>
@@ -534,7 +535,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       </table>
 
       <div style="margin-top: 15px; padding: 12px; border: 1px dashed #7e22ce; border-radius: 8px; background: #faf5ff; font-size: 12px; color: #581c87;">
-        <strong>🔐 Dashboard Login Credentials:</strong> Use your <strong>Auto-Assigned Team ID (${registeredTeam.id})</strong> and <strong>Password (${registeredTeam.accessPassword || 'CODE2026#9841'})</strong> or Leader Email to login to the Participant Portal to submit projects and track live rounds.
+        <strong>🔐 Dashboard Login Credentials:</strong> Use your <strong>Auto-Assigned Team ID (${registeredTeam.id})</strong> and the password shown above, or your Leader Email, to login to the Participant Portal to submit projects and track live rounds.
       </div>
 
       <div class="qr-box">
@@ -1221,7 +1222,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                     <div className="mt-1 space-x-2">
                       <span className="text-slate-300">Team ID: <strong className="text-cyan-300 font-mono">{registeredTeam.id}</strong></span>
                       <span className="text-slate-500">•</span>
-                      <span className="text-slate-300">Password: <strong className="text-purple-300 font-mono bg-purple-900/60 px-2 py-0.5 rounded border border-purple-700">{registeredTeam.accessPassword || 'CODE2026#9841'}</strong></span>
+                      <span className="text-slate-300">Password: <strong className="text-purple-300 font-mono bg-purple-900/60 px-2 py-0.5 rounded border border-purple-700">{registeredTeam.accessPassword || 'Unavailable - request an admin reset'}</strong></span>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1">
                       Use this Password to sign in to the Participant Dashboard & submit projects.
@@ -1230,7 +1231,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(`Team ID: ${registeredTeam.id}\nPassword: ${registeredTeam.accessPassword || 'CODE2026#9841'}\nLeader Email: ${registeredTeam.leaderEmail}`);
+                      navigator.clipboard.writeText(`Team ID: ${registeredTeam.id}\nPassword: ${registeredTeam.accessPassword || 'Unavailable - request an admin reset'}\nLeader Email: ${registeredTeam.leaderEmail}`);
                       alert("Credentials copied to clipboard!");
                     }}
                     className="px-3 py-1.5 rounded-lg bg-purple-900 hover:bg-purple-800 text-purple-200 text-xs font-bold font-mono shrink-0 border border-purple-600"
@@ -1578,7 +1579,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                   <div className="text-cyan-300 font-bold">⚡ AUTO-ASSIGNED CREDENTIALS:</div>
                   <div>Team ID: <strong className="text-white font-bold">{registeredTeam.id}</strong></div>
                   <div>Registration No: <strong className="text-amber-300">{registeredTeam.regNumber}</strong></div>
-                  <div>Portal Password: <strong className="text-purple-300 bg-purple-900/80 px-1.5 py-0.5 rounded">{registeredTeam.accessPassword || 'CODE2026#9841'}</strong></div>
+                  <div>Portal Password: <strong className="text-purple-300 bg-purple-900/80 px-1.5 py-0.5 rounded">{registeredTeam.accessPassword || 'Unavailable - request an admin reset'}</strong></div>
                   <div>Chosen Track: <strong className="text-cyan-200">{registeredTeam.preferredTrack}</strong></div>
                   <div>Payment UTR: <strong className="text-emerald-300">{registeredTeam.paymentUtr || paymentUtr}</strong></div>
                 </div>
