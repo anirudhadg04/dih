@@ -491,6 +491,61 @@
   ],
   "adminUsers": [
     {
+      "id": "adm-1",
+      "email": "superadmin@kssem.edu.in",
+      "username": "superadmin",
+      "password": "pbkdf2_sha256$e8dc36b69737c7fae464f00ac43716d9$4f88fb9fc8179a8519b4079daec4b73bac0efca015bb0f7b76dad18ed518dc83",
+      "name": "Dr. K Venkata Rao",
+      "role": "SUPER_ADMIN",
+      "status": "Active",
+      "createdAt": "2026-08-01",
+      "twoFactorEnabled": true
+    },
+    {
+      "id": "adm-2",
+      "email": "regmanager@kssem.edu.in",
+      "username": "regmanager",
+      "password": "pbkdf2_sha256$d21ac660959a42f601771e28a0a36a2d$91526f881e2d034847ca6f9f5887ff283a58490434427078cbee2d1de791ffab",
+      "name": "Prof. Rajesh Kumar",
+      "role": "REGISTRATION_MANAGER",
+      "status": "Active",
+      "createdAt": "2026-08-02",
+      "twoFactorEnabled": false
+    },
+    {
+      "id": "adm-3",
+      "email": "contentmanager@kssem.edu.in",
+      "username": "contentmanager",
+      "password": "pbkdf2_sha256$dccdc68d8dfa92ee6de1c6b7b3324c7e$825e4371f0f413fd44e43493c5483060a339e4489f96bf97632ec7953fb49da5",
+      "name": "Prof. Sneha V",
+      "role": "CONTENT_MANAGER",
+      "status": "Active",
+      "createdAt": "2026-08-03",
+      "twoFactorEnabled": true
+    },
+    {
+      "id": "adm-4",
+      "email": "judge1@bosch.com",
+      "username": "judge1",
+      "password": "pbkdf2_sha256$4b64f953e76e7857bc27c81c52715814$fa09ef15b283237071287a0d54ae0ea201919c490c81c27720adfeb77325975c",
+      "name": "Dr. Ramesh Kumar (Bosch)",
+      "role": "JUDGE",
+      "status": "Active",
+      "createdAt": "2026-08-04",
+      "twoFactorEnabled": false
+    },
+    {
+      "id": "adm-5",
+      "email": "checkin1@kssem.edu.in",
+      "username": "checkin1",
+      "password": "pbkdf2_sha256$52f8b359bfb4134d9dea99a5f0c1eb60$63f5ec8dd4c548beaf80b185c6c3dd18b8aa8d2267b920b446910c7680e7e086",
+      "name": "Volunteer Gate Staff 1",
+      "role": "CHECKIN_STAFF",
+      "status": "Active",
+      "createdAt": "2026-08-05",
+      "twoFactorEnabled": false
+    },
+    {
       "id": "adm-1788712049849",
       "email": "kgsoumya1605@gmail.com",
       "name": "soumya",
