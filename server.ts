@@ -275,7 +275,8 @@ export async function startServer() {
   const app = express();
   const requestedPort = PUBLIC_PORT;
 
-  app.use(express.json({ limit: "10mb" }));
+  // An 8 MB screenshot expands when sent as a base64 data URL.
+  app.use(express.json({ limit: "16mb" }));
 
   // =============================================================
   // Production hardening / reliability middleware
@@ -1062,16 +1063,41 @@ export async function startServer() {
   // Verify PhonePe Payment Endpoint
   app.post("/api/verify-payment", (req, res) => {
     try {
-      const { utr, amount, screenshotProvided } = req.body;
+      const { utr, amount, paymentScreenshot } = req.body;
       const expectedAmount = Number(amount) || cmsConfig.registrationFee;
       const cleanUtr = (utr ? String(utr).trim().toUpperCase() : '');
       const validUtrPattern = /^[A-Z0-9]{12,22}$/i;
+      const screenshotMatch = typeof paymentScreenshot === 'string'
+        ? paymentScreenshot.match(/^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/i)
+        : null;
 
-      if (!screenshotProvided) {
+      if (!screenshotMatch) {
         return res.status(400).json({
           success: false,
           verified: false,
-          error: "Payment verification failed: no payment screenshot was uploaded. Please upload a screenshot of your successful PhonePe transaction."
+          error: "Payment verification failed: the uploaded proof is missing or is not a supported PNG, JPG, GIF, or WebP image."
+        });
+      }
+
+      const screenshotBytes = Buffer.from(screenshotMatch[2], "base64");
+      if (screenshotBytes.length === 0 || screenshotBytes.length > 8 * 1024 * 1024) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Payment verification failed: the screenshot must be under 8 MB and contain image data."
+        });
+      }
+
+      const isPng = screenshotBytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+      const isJpeg = screenshotBytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+      const isGif = screenshotBytes.subarray(0, 3).toString("ascii") === "GIF";
+      const isWebp = screenshotBytes.subarray(0, 4).toString("ascii") === "RIFF"
+        && screenshotBytes.subarray(8, 12).toString("ascii") === "WEBP";
+      if (!isPng && !isJpeg && !isGif && !isWebp) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Payment verification failed: the uploaded file does not contain valid image data."
         });
       }
 
@@ -1098,7 +1124,7 @@ export async function startServer() {
         amount: expectedAmount,
         beneficiary: "ANVATION 2026 (kgsoumya1605@okicici)",
         verifiedAt: new Date().toISOString(),
-        message: `Payment of ₹${expectedAmount} verified successfully via PhonePe UPI Gateway.`
+        message: `Payment proof received: UTR format and uploaded image verified locally for ₹${expectedAmount}. Final settlement must be confirmed by the admin desk.`
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });

@@ -344,7 +344,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         body: JSON.stringify({
           utr: utrToVerify,
           amount: String(totalFee),
-          screenshotProvided: !!paymentScreenshotData
+          paymentScreenshot: paymentScreenshotData
         })
       });
 
@@ -850,14 +850,14 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 {paymentVerifying && (
                   <div className="p-3 rounded-xl bg-indigo-950 border border-indigo-500 text-indigo-200 text-xs flex items-center gap-2 animate-pulse">
                     <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
-                    <span className="font-bold">Verifying ₹{currentTotalFee} payment on PhonePe / UPI network...</span>
+                    <span className="font-bold">Checking the UTR and uploaded payment proof...</span>
                   </div>
                 )}
 
                 {paymentVerifiedSuccess && (
                   <div className="p-3 rounded-xl bg-emerald-950 border border-emerald-500 text-emerald-300 text-xs flex items-center gap-2 animate-fadeIn shadow-lg">
                     <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                    <span className="font-bold">✓ Payment of ₹{currentTotalFee} confirmed! Proceeding to registration...</span>
+                    <span className="font-bold">✓ UTR and payment proof accepted! Proceeding to registration...</span>
                   </div>
                 )}
 
