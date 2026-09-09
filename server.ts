@@ -848,6 +848,324 @@ export async function startServer() {
     next();
   });
 
+  // =============================================================
+  // Fast In-Memory Uniqueness Index Sets
+  // =============================================================
+  const registeredEmails = new Set<string>();
+  const registeredPhones = new Set<string>();
+  const registeredUsns = new Set<string>();
+  const registeredUtrs = new Set<string>();
+
+  function rebuildUniquenessIndexes() {
+    registeredEmails.clear();
+    registeredPhones.clear();
+    registeredUsns.clear();
+    registeredUtrs.clear();
+
+    for (const t of teams) {
+      if (t.paymentUtr && t.paymentUtr !== "PENDING" && t.paymentUtr !== "SUBMITTED") {
+        registeredUtrs.add(String(t.paymentUtr).trim().toUpperCase());
+      }
+      if (t.leaderEmail) {
+        registeredEmails.add(String(t.leaderEmail).trim().toLowerCase());
+      }
+      for (const m of (t.members || [])) {
+        if (m.email) registeredEmails.add(String(m.email).trim().toLowerCase());
+        if (m.usn) registeredUsns.add(String(m.usn).trim().toUpperCase());
+        if (m.phone) {
+          const cleanPhone = String(m.phone).replace(/[^0-9]/g, "");
+          if (cleanPhone) registeredPhones.add(cleanPhone);
+        }
+      }
+    }
+  }
+
+  // Idempotency cache for registration requests (5 min TTL)
+  const idempotencyStore = new Map<string, { status: number; body: any; expiresAt: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of idempotencyStore.entries()) {
+      if (now > val.expiresAt) idempotencyStore.delete(key);
+    }
+  }, 60000);
+
+  // In-Memory Mutex for serializing registration critical sections
+  let registrationMutex: Promise<any> = Promise.resolve();
+  function withRegistrationLock<T>(fn: () => Promise<T>): Promise<T> {
+    const next = registrationMutex.catch(() => {}).then(() => fn());
+    registrationMutex = next.catch(() => {});
+    return next;
+  }
+
+  // Registration payload and uniqueness validation
+  function validateTeamRegistration(body: any): {
+    valid: boolean;
+    error?: string;
+    isDuplicate?: boolean;
+    field?: string;
+    fields?: string[];
+    message?: string;
+  } {
+    if (!body || typeof body !== "object") {
+      return { valid: false, error: "Invalid registration payload." };
+    }
+
+    const { teamName, preferredTrack, leader, members = [] } = body;
+
+    // 1. Team Name Validation
+    if (!teamName || typeof teamName !== "string" || !teamName.trim()) {
+      return { valid: false, error: "Team name is required." };
+    }
+    const cleanTeamName = teamName.trim();
+    if (cleanTeamName.length < 2 || cleanTeamName.length > 50) {
+      return { valid: false, error: "Team name must be between 2 and 50 characters." };
+    }
+
+    // 2. Leader Validation
+    if (!leader || typeof leader !== "object") {
+      return { valid: false, error: "Team leader details are strictly required." };
+    }
+    if (!leader.fullName?.trim()) {
+      return { valid: false, error: "Leader full name is required." };
+    }
+    if (!leader.email?.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leader.email.trim())) {
+      return { valid: false, error: "Valid leader email address is required." };
+    }
+    if (!leader.usn?.trim()) {
+      return { valid: false, error: "Leader USN / roll number is required." };
+    }
+
+    // 3. Team Size Validation (1 leader + 1 to 3 members = 2 to 4 total)
+    if (!Array.isArray(members) || members.length < 1 || members.length > 3) {
+      return {
+        valid: false,
+        error: `Invalid team size: Teams must have between 2 and 4 participants (1 leader + 1 to 3 additional members). Received ${1 + (Array.isArray(members) ? members.length : 0)} participant(s).`
+      };
+    }
+
+    // 4. Validate Each Member
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i];
+      if (!m || typeof m !== "object") {
+        return { valid: false, error: `Member #${i + 2} details are missing or invalid.` };
+      }
+      if (!m.fullName?.trim()) {
+        return { valid: false, error: `Member #${i + 2} full name is required.` };
+      }
+      if (!m.email?.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email.trim())) {
+        return { valid: false, error: `Member #${i + 2} valid email address is required.` };
+      }
+      if (!m.usn?.trim()) {
+        return { valid: false, error: `Member #${i + 2} USN / roll number is required.` };
+      }
+    }
+
+    // 5. Uniqueness Validation within current submission
+    const allParticipants = [leader, ...members];
+    const localEmails = new Set<string>();
+    const localUsns = new Set<string>();
+    const localPhones = new Set<string>();
+
+    for (let i = 0; i < allParticipants.length; i++) {
+      const p = allParticipants[i];
+      const email = p.email.trim().toLowerCase();
+      const usn = p.usn.trim().toUpperCase();
+      const phone = p.phone ? String(p.phone).replace(/[^0-9]/g, "") : "";
+
+      if (localEmails.has(email)) {
+        return {
+          valid: false,
+          isDuplicate: true,
+          field: `member-${i}-email`,
+          fields: [`member-${i}-email`],
+          message: `Duplicate email detected in this team submission: "${p.email}". Each participant must have a unique email address.`
+        };
+      }
+      localEmails.add(email);
+
+      if (localUsns.has(usn)) {
+        return {
+          valid: false,
+          isDuplicate: true,
+          field: `member-${i}-usn`,
+          fields: [`member-${i}-usn`],
+          message: `Duplicate USN detected in this team submission: "${p.usn}". Each participant must have a unique USN / roll number.`
+        };
+      }
+      localUsns.add(usn);
+
+      if (phone && localPhones.has(phone)) {
+        return {
+          valid: false,
+          isDuplicate: true,
+          field: `member-${i}-phone`,
+          fields: [`member-${i}-phone`],
+          message: `Duplicate phone number detected in this team submission: "${p.phone}". Each participant must have a unique contact number.`
+        };
+      }
+      if (phone) localPhones.add(phone);
+    }
+
+    // 6. Global Uniqueness Validation against all registered teams
+    for (let i = 0; i < allParticipants.length; i++) {
+      const p = allParticipants[i];
+      const email = p.email.trim().toLowerCase();
+      const usn = p.usn.trim().toUpperCase();
+      const phone = p.phone ? String(p.phone).replace(/[^0-9]/g, "") : "";
+
+      if (registeredEmails.has(email)) {
+        return {
+          valid: false,
+          isDuplicate: true,
+          field: `member-${i}-email`,
+          fields: [`member-${i}-email`],
+          message: `The email "${p.email}" is already registered with another team. Each participant can only register once.`
+        };
+      }
+      if (registeredUsns.has(usn)) {
+        return {
+          valid: false,
+          isDuplicate: true,
+          field: `member-${i}-usn`,
+          fields: [`member-${i}-usn`],
+          message: `The USN "${p.usn}" is already registered with another team. Each participant can only register once.`
+        };
+      }
+      if (phone && registeredPhones.has(phone)) {
+        return {
+          valid: false,
+          isDuplicate: true,
+          field: `member-${i}-phone`,
+          fields: [`member-${i}-phone`],
+          message: `The phone number "${p.phone}" is already registered with another team. Each participant can only register once.`
+        };
+      }
+    }
+
+    return { valid: true };
+  }
+
+  function validatePaymentUtr(paymentUtr: any, paymentUtrConfirm?: any): { valid: boolean; error?: string; cleanUtr?: string } {
+    if (!paymentUtr || typeof paymentUtr !== "string" || !paymentUtr.trim()) {
+      return { valid: false, error: "Payment UTR / transaction reference number is required." };
+    }
+    const cleanUtr = paymentUtr.trim().toUpperCase();
+    if (!/^[A-Z0-9]{12,22}$/.test(cleanUtr)) {
+      return { valid: false, error: "Invalid UTR format. Please provide a valid 12+ character alphanumeric UPI/PhonePe transaction reference." };
+    }
+    if (paymentUtrConfirm && typeof paymentUtrConfirm === "string" && paymentUtrConfirm.trim()) {
+      const cleanConfirm = paymentUtrConfirm.trim().toUpperCase();
+      if (cleanUtr !== cleanConfirm) {
+        return { valid: false, error: "The entered UTR numbers do not match. Please verify your payment confirmation reference." };
+      }
+    }
+    if (registeredUtrs.has(cleanUtr)) {
+      return { valid: false, error: `This payment transaction reference (${cleanUtr}) has already been registered with another team.` };
+    }
+    return { valid: true, cleanUtr };
+  }
+
+  // Asynchronous Credential Delivery Helper
+  async function deliverCredentialsForTeam(team: Team, rawAccessPassword?: string): Promise<{
+    success: boolean;
+    deliveredCount: number;
+    failedCount: number;
+    results: Array<{ recipient: string; status: string; error?: string }>;
+  }> {
+    const participantList = (team.members || []).map((m) => ({
+      email: m.email,
+      name: m.fullName,
+      college: m.college || "KSSEM",
+      role: m.role || "Member"
+    }));
+
+    const subject = `🎉 Registration Confirmed: ANVATION 2026 [Team ID: ${team.id}]`;
+    const dates = "October 8 - October 9, 2026 (24-Hour Hackathon)";
+    const venue = "K.S. School of Engineering and Management (KSSEM), Kanakapura Road, Bengaluru - 560109";
+
+    let gateQrBuffer: Buffer | null = null;
+    let gateQrDataUrl = "";
+    try {
+      gateQrDataUrl = await QRCode.toDataURL(
+        `https://anvation.live/checkin?teamId=${team.id}&reg=${team.regNumber}`,
+        { width: 200, margin: 2 }
+      );
+      gateQrBuffer = Buffer.from(gateQrDataUrl.split(",")[1], "base64");
+    } catch (qrErr) {
+      console.warn(`[QR ERROR] Could not generate QR code for team ${team.id}:`, qrErr);
+    }
+
+    const recipientResults: Array<{ recipient: string; status: string; error?: string }> = [];
+    let deliveredCount = 0;
+    let failedCount = 0;
+
+    const smtpHost = process.env.SMTP_HOST;
+    if (smtpHost) {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: process.env.SMTP_SECURE === "true",
+        auth: {
+          user: process.env.SMTP_USER || "",
+          pass: process.env.SMTP_PASS || ""
+        }
+      });
+      const from = process.env.MAIL_FROM || `"ANVATION 2026" <${process.env.SMTP_USER || "noreply@anvation.local"}>`;
+
+      for (const p of participantList) {
+        try {
+          const info = await transporter.sendMail({
+            from,
+            to: p.email,
+            subject,
+            text: `ANVATION 2026 - Registration Confirmed\nHello ${p.name},\nTeam ID: ${team.id}\nRegistration No: ${team.regNumber}\nTeam Name: ${team.teamName}\nTrack: ${team.preferredTrack}\n${rawAccessPassword ? `Password: ${rawAccessPassword}\n` : ''}Payment UTR: ${team.paymentUtr || 'SUBMITTED'}\nVenue: ${venue}\nDates: ${dates}`,
+            html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+              <div style="background:#0b192c;color:#fff;padding:20px 24px;">
+                <h1 style="margin:0;font-size:20px;">ANVATION 2026</h1>
+                <p style="margin:4px 0 0;font-size:12px;color:#67e8f9;">NATIONAL LEVEL 24-HOUR HACKATHON</p>
+              </div>
+              <div style="padding:24px;">
+                <h2 style="color:#0f172a;margin-top:0;">Registration Confirmed ✓</h2>
+                <p>Dear <strong>${p.name}</strong>,</p>
+                <p>Congratulations! Your team's registration for <strong>ANVATION 2026</strong> has been confirmed.</p>
+                <p><strong>Team ID:</strong> ${team.id}<br/><strong>Reg No:</strong> ${team.regNumber}<br/><strong>Team Name:</strong> ${team.teamName}<br/><strong>Track:</strong> ${team.preferredTrack}${rawAccessPassword ? `<br/><strong>Password:</strong> ${rawAccessPassword}` : ''}<br/><strong>UTR:</strong> ${team.paymentUtr || 'SUBMITTED'}</p>
+                ${gateQrDataUrl ? `<div style="text-align:center;margin:20px 0;"><img src="${gateQrDataUrl}" width="160" alt="Gate QR Pass"/><p style="font-size:12px;color:#64748b;">Gate Entry Pass QR</p></div>` : ''}
+              </div>
+            </div>`,
+            attachments: gateQrBuffer
+              ? [{
+                  filename: `gate-pass-${team.id}.png`,
+                  content: gateQrBuffer,
+                  cid: "gate-pass-qr",
+                  contentType: "image/png"
+                }]
+              : undefined
+          });
+          deliveredCount++;
+          recipientResults.push({ recipient: p.email, status: "SENT" });
+          console.log(`[EMAIL SENT] To: ${p.email} | Team: ${team.id} | MsgId: ${info.messageId}`);
+        } catch (mailErr: any) {
+          failedCount++;
+          recipientResults.push({ recipient: p.email, status: "FAILED", error: String(mailErr.message || mailErr) });
+          console.error(`[EMAIL FAILED] To: ${p.email} | Team: ${team.id} | ${mailErr.message}`);
+        }
+      }
+
+      team.credentialDeliveryStatus = failedCount === 0 ? "delivered" : (deliveredCount > 0 ? "delivered" : "failed");
+      markDirty();
+      return { success: deliveredCount > 0, deliveredCount, failedCount, results: recipientResults };
+    } else {
+      for (const p of participantList) {
+        recipientResults.push({ recipient: p.email, status: "READY_LOCAL" });
+        deliveredCount++;
+      }
+      console.log(`[EMAIL LOG] SMTP not configured. Generated confirmation records for: ${participantList.map(p => p.email).join(", ")} | Team: ${team.id}`);
+      team.credentialDeliveryStatus = "delivered";
+      markDirty();
+      return { success: true, deliveredCount, failedCount: 0, results: recipientResults };
+    }
+  }
+
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -894,6 +1212,7 @@ export async function startServer() {
       scorecards = [];
       tickets = [];
       nextTeamNumber = 0;
+      rebuildUniquenessIndexes();
       console.log(`[ADMIN ACTION] Cleared all ${previousCount} registered teams.`);
       res.json({
         success: true,
@@ -1036,6 +1355,14 @@ export async function startServer() {
   });
 
   app.post("/api/register", async (req, res) => {
+    const idempotencyKey = req.headers["idempotency-key"] ? String(req.headers["idempotency-key"]).trim() : null;
+    if (idempotencyKey) {
+      const cached = idempotencyStore.get(idempotencyKey);
+      if (cached && Date.now() < cached.expiresAt) {
+        return res.status(cached.status).json(cached.body);
+      }
+    }
+
     try {
       if (cmsConfig.freezeRegistrations || !cmsConfig.registrationOpen) {
         return res.status(403).json({
@@ -1044,220 +1371,247 @@ export async function startServer() {
         });
       }
 
-      const { teamName, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentAmount, paymentScreenshot } = req.body;
-      
-      // 1. Team Name Validation
-      if (!teamName || !String(teamName).trim()) {
-        return res.status(400).json({ success: false, error: "Team name is required." });
-      }
-
-      // 2. Leader Validation
-      if (!leader || !leader.fullName?.trim() || !leader.email?.trim() || !leader.usn?.trim()) {
-        return res.status(400).json({
-          success: false,
-          error: "Team leader details are incomplete. Full Name, Email, and USN are strictly required."
-        });
-      }
-
-      // 3. Team Size Validation (1 leader + 1 to 3 additional members = 2 to 4 participants total)
-      if (!Array.isArray(members) || members.length < 1 || members.length > 3) {
-        return res.status(400).json({
-          success: false,
-          error: `Invalid team size: Teams must have between 2 and 4 participants (1 leader + 1 to 3 additional members). Received ${1 + (Array.isArray(members) ? members.length : 0)} participant(s).`
-        });
-      }
-
-      // 4. Validate Each Additional Member
-      for (let i = 0; i < members.length; i++) {
-        const m = members[i];
-        if (!m || !m.fullName?.trim() || !m.email?.trim() || !m.usn?.trim()) {
-          return res.status(400).json({
-            success: false,
-            error: `Member #${i + 2} details are incomplete. Full Name, Email, and USN are required for every team member.`
-          });
+      const result = await withRegistrationLock(async () => {
+        // 1. Validate team payload and check uniqueness across members & existing teams
+        const teamValidation = validateTeamRegistration(req.body);
+        if (!teamValidation.valid) {
+          if (teamValidation.isDuplicate) {
+            const body: any = {
+              success: false,
+              error: "duplicate_registration",
+              message: teamValidation.message || "This detail is already registered."
+            };
+            if (teamValidation.field) {
+              body.field = teamValidation.field;
+            }
+            if (teamValidation.fields) {
+              body.fields = teamValidation.fields;
+            }
+            return { status: 409, body };
+          }
+          return { status: 400, body: { success: false, error: teamValidation.error } };
         }
-      }
 
-      // 5. Uniqueness Validation (No duplicate emails or USNs across participants)
-      const allParticipantsList = [leader, ...members];
-      const seenEmails = new Set<string>();
-      const seenUsns = new Set<string>();
-      for (const p of allParticipantsList) {
-        const cleanEmail = p.email.trim().toLowerCase();
-        const cleanUsn = p.usn.trim().toUpperCase();
-        if (seenEmails.has(cleanEmail)) {
-          return res.status(400).json({
-            success: false,
-            error: `Duplicate email detected: "${p.email}". Each participant in the team must have a unique email address.`
-          });
+        const { teamName, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentUtrConfirm, paymentAmount, paymentScreenshot } = req.body;
+
+        // 2. Validate Payment UTR
+        const utrValidation = validatePaymentUtr(paymentUtr, paymentUtrConfirm);
+        if (!utrValidation.valid) {
+          return { status: 400, body: { success: false, error: utrValidation.error } };
         }
-        seenEmails.add(cleanEmail);
-        if (seenUsns.has(cleanUsn)) {
-          return res.status(400).json({
-            success: false,
-            error: `Duplicate USN detected: "${p.usn}". Each participant in the team must have a unique USN / roll number.`
-          });
+        const cleanUtr = utrValidation.cleanUtr!;
+
+        // 3. Server-side fee calculation (never trust client amounts alone)
+        const participantCount = 1 + members.length;
+        const feePerParticipant = Number(cmsConfig.registrationFee || 1);
+        const expectedTotalFee = participantCount * feePerParticipant;
+        if (paymentAmount !== undefined && Number(paymentAmount) !== expectedTotalFee) {
+          return {
+            status: 400,
+            body: {
+              success: false,
+              error: `Payment amount mismatch: Expected ₹${expectedTotalFee} for ${participantCount} participants (₹${feePerParticipant} × ${participantCount}), but received ₹${paymentAmount}.`
+            }
+          };
         }
-        seenUsns.add(cleanUsn);
-      }
 
-      // 6. Payment Verification & Amount Validation (Dynamic: total participants * feePerParticipant)
-      const participantCount = 1 + members.length;
-      const feePerParticipant = Number(cmsConfig.registrationFee || 1);
-      const expectedTotalFee = participantCount * feePerParticipant;
-      if (paymentAmount !== undefined && Number(paymentAmount) !== expectedTotalFee) {
-        return res.status(400).json({
-          success: false,
-          error: `Payment amount mismatch: Expected ₹${expectedTotalFee} for ${participantCount} participants (₹${feePerParticipant} × ${participantCount}), but received ₹${paymentAmount}.`
-        });
-      }
+        // 4. Payment screenshot validation
+        if (!paymentScreenshot || String(paymentScreenshot).trim() === '') {
+          return {
+            status: 400,
+            body: {
+              success: false,
+              error: "Payment screenshot is required. Please upload a screenshot of your successful PhonePe transaction before registering."
+            }
+          };
+        }
 
-      // 7. Payment screenshot is MANDATORY — a team must never be registered without proof.
-      if (!paymentScreenshot || String(paymentScreenshot).trim() === '') {
-        return res.status(400).json({
-          success: false,
-          error: "Payment screenshot is required. Please upload a screenshot of your successful PhonePe transaction before registering."
-        });
-      }
+        // 5. Generate secure team IDs and password
+        const teamIndex = ++nextTeamNumber;
+        const teamId = `AN-${String(teamIndex).padStart(3, '0')}`;
+        const regNumber = `CODE-2026-${String(teamIndex).padStart(3, '0')}`;
 
-      const teamIndex = ++nextTeamNumber;
-      const teamId = `AN-${String(teamIndex).padStart(3, '0')}`;
-      const regNumber = `CODE-2026-${String(teamIndex).padStart(3, '0')}`;
-
-      const leaderParticipant: Participant = {
-        id: `p-${teamIndex}-1`,
-        fullName: sanitizeInputString(leader.fullName),
-        college: sanitizeInputString(leader.college || 'KS School of Engineering & Management'),
-        department: sanitizeInputString(leader.department || 'Computer Science & Engineering'),
-        semester: sanitizeInputString(leader.semester || '6th Semester'),
-        email: sanitizeInputString(leader.email),
-        phone: sanitizeInputString(leader.phone || ''),
-        usn: sanitizeInputString(leader.usn),
-        gender: sanitizeInputString(leader.gender || 'Male'),
-        githubUrl: sanitizeInputString(leader.githubUrl),
-        linkedinUrl: sanitizeInputString(leader.linkedinUrl),
-        role: 'Leader',
-        teamId,
-        accommodationRequired: !!accommodationRequired,
-        emergencyContact: sanitizeInputString(leader.emergencyContact || leader.phone || ''),
-        checkedIn: false,
-        foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
-      };
-
-      const formattedMembers: Participant[] = members.map((m: any, idx: number) => ({
-        id: `p-${teamIndex}-${idx + 2}`,
-        fullName: sanitizeInputString(m.fullName),
-        college: sanitizeInputString(m.college || leader.college || 'KSSEM'),
-        department: sanitizeInputString(m.department || 'CSE'),
-        semester: sanitizeInputString(m.semester || '6th Semester'),
-        email: sanitizeInputString(m.email),
-        phone: sanitizeInputString(m.phone || ''),
-        usn: sanitizeInputString(m.usn),
-        gender: sanitizeInputString(m.gender || 'Male'),
-        githubUrl: sanitizeInputString(m.githubUrl),
-        linkedinUrl: sanitizeInputString(m.linkedinUrl),
-        role: 'Member',
-        teamId,
-        accommodationRequired: !!accommodationRequired,
-        emergencyContact: sanitizeInputString(m.emergencyContact || leader.phone || ''),
-        checkedIn: false,
-        foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
-      }));
-
-      const accessPassword = `CODE2026#${Math.floor(1000 + Math.random() * 9000)}`;
-
-      const newTeam: Team = {
-        id: teamId,
-        regNumber,
-        teamName: sanitizeInputString(teamName),
-        leaderEmail: sanitizeInputString(leader.email),
-        accessPassword: hashPassword(accessPassword),
-        preferredTrack: sanitizeInputString(preferredTrack || 'Artificial Intelligence & Machine Learning'),
-        members: [leaderParticipant, ...formattedMembers],
-        status: 'Confirmed',
-        createdAt: new Date().toISOString(),
-        projectSubmitted: false,
-        paymentUtr: sanitizeInputString(paymentUtr || 'PENDING'),
-        paymentStatus: 'Verified',
-        paymentScreenshot: paymentScreenshot || null
-      };
-
-      // Registration data is also written to a lightweight, append-only CSV
-      // before we report success. This gives organisers a recoverable list of
-      // every participant even if the Admin Portal is unavailable later.
-      //
-      // Do this before mutating `teams`: a failed backup write must never leave
-      // a registration that the participant thinks has completed successfully.
-      try {
-        await appendParticipantRegistrationBackup(newTeam);
-      } catch (backupError) {
-        console.error("[BACKUP] Registration CSV write failed; registration was not accepted:", backupError);
-        return res.status(503).json({
-          success: false,
-          error: "Registration backup is temporarily unavailable. Please retry in a moment; no registration has been recorded."
-        });
-      }
-
-      try {
-        await syncParticipantBackupToGitHub(newTeam);
-      } catch (syncError) {
-        console.error("[BACKUP] GitHub CSV sync failed; registration was not accepted:", syncError);
-        return res.status(503).json({
-          success: false,
-          error: "Registration backup could not be published. Please retry in a moment; no registration has been recorded."
-        });
-      }
-
-      teams.push(newTeam);
-      markDirty(); // flush registration to disk promptly
-
-      // Automated registration email trigger for all team members
-      const allTeamEmails = [
-        { email: leader.email, name: leader.fullName, role: 'Leader' },
-        ...members.filter((m: any) => m.email).map((m: any) => ({ email: m.email, name: m.fullName, role: 'Member' }))
-      ];
-
-      const emailRecords = allTeamEmails.map(member => {
-        const emailRecord = {
-          id: `mail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          recipient: member.email,
-          recipientName: member.name,
-          role: member.role,
+        const leaderParticipant: Participant = {
+          id: `p-${teamIndex}-1`,
+          fullName: sanitizeInputString(leader.fullName),
+          college: sanitizeInputString(leader.college || 'KS School of Engineering & Management'),
+          department: sanitizeInputString(leader.department || 'Computer Science & Engineering'),
+          semester: sanitizeInputString(leader.semester || '6th Semester'),
+          email: sanitizeInputString(leader.email.trim().toLowerCase()),
+          phone: sanitizeInputString(leader.phone || ''),
+          usn: sanitizeInputString(leader.usn.trim().toUpperCase()),
+          gender: sanitizeInputString(leader.gender || 'Male'),
+          githubUrl: sanitizeInputString(leader.githubUrl),
+          linkedinUrl: sanitizeInputString(leader.linkedinUrl),
+          role: 'Leader',
           teamId,
-          teamName: newTeam.teamName,
-          track: preferredTrack || 'AI / ML',
-          accessPassword,
-          regNumber,
-          subject: `🎉 Registration Confirmed: ANVATION 2026 [Team ID: ${teamId}]`,
-          venue: "K.S. School of Engineering and Management (KSSEM), Kanakapura Road, Bengaluru - 560109",
-          dates: "October 8 - October 9, 2026 (24-Hour Hackathon)",
-          dispatchedAt: new Date().toISOString(),
-          status: "DELIVERED"
+          accommodationRequired: !!accommodationRequired,
+          emergencyContact: sanitizeInputString(leader.emergencyContact || leader.phone || ''),
+          checkedIn: false,
+          foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
         };
-        console.log(`[EMAIL DISPATCHED] To: ${member.email} (${member.name}) | Team: ${teamId} | Pass: ${accessPassword}`);
-        return emailRecord;
+
+        const formattedMembers: Participant[] = members.map((m: any, idx: number) => ({
+          id: `p-${teamIndex}-${idx + 2}`,
+          fullName: sanitizeInputString(m.fullName),
+          college: sanitizeInputString(m.college || leader.college || 'KSSEM'),
+          department: sanitizeInputString(m.department || 'CSE'),
+          semester: sanitizeInputString(m.semester || '6th Semester'),
+          email: sanitizeInputString(m.email.trim().toLowerCase()),
+          phone: sanitizeInputString(m.phone || ''),
+          usn: sanitizeInputString(m.usn.trim().toUpperCase()),
+          gender: sanitizeInputString(m.gender || 'Male'),
+          githubUrl: sanitizeInputString(m.githubUrl),
+          linkedinUrl: sanitizeInputString(m.linkedinUrl),
+          role: 'Member',
+          teamId,
+          accommodationRequired: !!accommodationRequired,
+          emergencyContact: sanitizeInputString(m.emergencyContact || leader.phone || ''),
+          checkedIn: false,
+          foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
+        }));
+
+        const accessPassword = `CODE2026#${Math.floor(1000 + Math.random() * 9000)}`;
+
+        const newTeam: Team = {
+          id: teamId,
+          regNumber,
+          teamName: sanitizeInputString(teamName),
+          leaderEmail: sanitizeInputString(leader.email.trim().toLowerCase()),
+          accessPassword: hashPassword(accessPassword),
+          preferredTrack: sanitizeInputString(preferredTrack || 'Artificial Intelligence & Machine Learning'),
+          members: [leaderParticipant, ...formattedMembers],
+          status: 'Confirmed',
+          createdAt: new Date().toISOString(),
+          projectSubmitted: false,
+          paymentUtr: cleanUtr,
+          paymentStatus: 'Verified',
+          paymentScreenshot: paymentScreenshot || null,
+          credentialDeliveryStatus: 'queued'
+        };
+
+        // Write to append-only CSV backup before persisting to memory/disk
+        try {
+          await appendParticipantRegistrationBackup(newTeam);
+        } catch (backupError) {
+          console.error("[BACKUP] Registration CSV write failed; registration was not accepted:", backupError);
+          return {
+            status: 503,
+            body: {
+              success: false,
+              error: "Registration backup is temporarily unavailable. Please retry in a moment; no registration has been recorded."
+            }
+          };
+        }
+
+        try {
+          await syncParticipantBackupToGitHub(newTeam);
+        } catch (syncError) {
+          console.error("[BACKUP] GitHub CSV sync failed; registration was not accepted:", syncError);
+          return {
+            status: 503,
+            body: {
+              success: false,
+              error: "Registration backup could not be published. Please retry in a moment; no registration has been recorded."
+            }
+          };
+        }
+
+        teams.push(newTeam);
+        rebuildUniquenessIndexes();
+        markDirty();
+
+        // Asynchronously deliver credentials to all participants without blocking the response
+        deliverCredentialsForTeam(newTeam, accessPassword).catch(deliveryErr => {
+          console.error(`[EMAIL DELIVERY ERROR] Team ${newTeam.id}:`, deliveryErr);
+        });
+
+        const allTeamEmails = [
+          { email: leader.email, name: leader.fullName, role: 'Leader' },
+          ...members.filter((m: any) => m.email).map((m: any) => ({ email: m.email, name: m.fullName, role: 'Member' }))
+        ];
+
+        const totalParticipants = teams.reduce((acc, t) => acc + t.members.length, 0);
+        const uniqueColleges = new Set(teams.flatMap(t => t.members.map(m => m.college))).size;
+        const totalCapacity = cmsConfig.maxRegistrations || 350;
+        const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
+        const registrationTeam = sanitizeTeamForClient(newTeam);
+
+        const responseBody = {
+          success: true,
+          team: registrationTeam,
+          accessPassword, // Return access password once upon registration
+          paymentAmount: expectedTotalFee,
+          emailDispatched: true,
+          emailRecipients: allTeamEmails.map(e => e.email),
+          stats: {
+            registeredCount: totalParticipants,
+            collegesCount: uniqueColleges,
+            seatsLeft,
+            totalSeats: totalCapacity,
+            totalTeams: teams.length
+          }
+        };
+
+        return { status: 201, body: responseBody };
       });
 
-      const totalParticipants = teams.reduce((acc, t) => acc + t.members.length, 0);
-      const uniqueColleges = new Set(teams.flatMap(t => t.members.map(m => m.college))).size;
-      const totalCapacity = 350;
-      const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
-      const registrationTeam = sanitizeTeamForClient(newTeam);
+      if (idempotencyKey) {
+        idempotencyStore.set(idempotencyKey, {
+          status: result.status,
+          body: result.body,
+          expiresAt: Date.now() + 5 * 60 * 1000
+        });
+      }
 
+      res.status(result.status).json(result.body);
+    } catch (err: any) {
+      console.error("[REGISTRATION ERROR]", err);
+      res.status(500).json({ success: false, error: err.message || "An unexpected error occurred during registration." });
+    }
+  });
+
+  // Admin Credential Re-delivery Endpoints
+  app.post("/api/registration/:teamId/deliver-credentials", requireAdmin, async (req, res) => {
+    try {
+      const { teamId } = req.params;
+      const team = teams.find(t => t.id.toLowerCase() === teamId.toLowerCase() || t.regNumber.toLowerCase() === teamId.toLowerCase());
+      if (!team) {
+        return res.status(404).json({ success: false, error: `Team ${teamId} not found.` });
+      }
+
+      const report = await deliverCredentialsForTeam(team);
       res.json({
-        success: true,
-        team: registrationTeam,
-        paymentAmount: expectedTotalFee,
-        emailDispatched: true,
-        emailRecipients: allTeamEmails.map(e => e.email),
-        emailRecords,
-        stats: {
-          registeredCount: totalParticipants,
-          collegesCount: uniqueColleges,
-          seatsLeft,
-          totalSeats: totalCapacity,
-          totalTeams: teams.length
-        }
+        success: report.success,
+        deliveredCount: report.deliveredCount,
+        failedCount: report.failedCount,
+        recipients: report.results.map(r => r.recipient),
+        emailRecipients: report.results,
+        transport: process.env.SMTP_HOST ? "SMTP" : "LOCAL",
+        smtpConfigured: !!process.env.SMTP_HOST
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/registration/:teamId/deliver-credentials/retry", requireAdmin, async (req, res) => {
+    try {
+      const { teamId } = req.params;
+      const team = teams.find(t => t.id.toLowerCase() === teamId.toLowerCase() || t.regNumber.toLowerCase() === teamId.toLowerCase());
+      if (!team) {
+        return res.status(404).json({ success: false, error: `Team ${teamId} not found.` });
+      }
+
+      const report = await deliverCredentialsForTeam(team);
+      res.json({
+        success: report.success,
+        deliveredCount: report.deliveredCount,
+        failedCount: report.failedCount,
+        recipients: report.results.map(r => r.recipient),
+        emailRecipients: report.results,
+        transport: process.env.SMTP_HOST ? "SMTP" : "LOCAL",
+        smtpConfigured: !!process.env.SMTP_HOST
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -1557,6 +1911,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       }
 
       teams[index] = updatedTeam;
+      rebuildUniquenessIndexes();
       markDirty();
       res.json({ success: true, team: sanitizeTeamForClient(updatedTeam), message: "Team updated successfully" });
     } catch (err: any) {
@@ -1572,6 +1927,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     if (teams.length === initialLen) {
       return res.status(404).json({ success: false, error: "Team not found" });
     }
+    rebuildUniquenessIndexes();
     res.json({ success: true, message: "Team deleted successfully" });
     markDirty();
   });
@@ -1589,6 +1945,8 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
           ...team.members[memberIndex],
           ...participantData
         };
+        rebuildUniquenessIndexes();
+        markDirty();
         found = true;
         return res.json({ success: true, participant: team.members[memberIndex], message: "Participant updated successfully" });
       }
@@ -1932,13 +2290,31 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         }));
       }
       if (Array.isArray(saved.adminUsers)) {
-        adminUsers = saved.adminUsers.map((user: any) => ({
-          ...user,
-            password: normalizeStoredPassword(user.password || DEFAULT_ADMIN_PASSWORD)
-        }));
+        const savedMap = new Map<string, any>(saved.adminUsers.map((u: any) => [u.id, u]));
+        const mergedUsers: AdminUser[] = [];
+        for (const defaultUser of adminUsers) {
+          if (savedMap.has(defaultUser.id)) {
+            const savedU: any = savedMap.get(defaultUser.id);
+            mergedUsers.push({
+              ...savedU,
+              password: normalizeStoredPassword(savedU.password || DEFAULT_ADMIN_PASSWORD)
+            });
+            savedMap.delete(defaultUser.id);
+          } else {
+            mergedUsers.push(defaultUser);
+          }
+        }
+        for (const customUser of Array.from(savedMap.values())) {
+          mergedUsers.push({
+            ...customUser,
+            password: normalizeStoredPassword(customUser.password || DEFAULT_ADMIN_PASSWORD)
+          });
+        }
+        adminUsers = mergedUsers;
       }
       if (Array.isArray(saved.checkpoints)) checkpoints = saved.checkpoints;
       if (typeof saved.nextTeamNumber === "number") nextTeamNumber = saved.nextTeamNumber;
+      rebuildUniquenessIndexes();
     } catch (e) {
       console.warn("Failed to load persisted records:", e);
     }

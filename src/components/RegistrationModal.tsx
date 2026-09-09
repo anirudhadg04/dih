@@ -48,6 +48,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   // team's paymentScreenshot (base64 data URL) via /api/register.
   const [paymentScreenshotData, setPaymentScreenshotData] = useState<string | null>(null);
   const [paymentScreenshotName, setPaymentScreenshotName] = useState<string>('');
+  const [duplicateErrorInfo, setDuplicateErrorInfo] = useState<{ isDuplicate: boolean; field?: string; message?: string } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Guards against duplicate submissions (double-click or payment auto-fire)
@@ -335,11 +336,22 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         setStep(5); // Go straight to confirmation slip!
         confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
       } else {
-        setPaymentFailError(data.error || "Registration could not be completed.");
+        if (res.status === 409 || data.error === "duplicate_registration") {
+          setDuplicateErrorInfo({
+            isDuplicate: true,
+            field: data.field,
+            message: data.message || "This detail is already registered."
+          });
+          setPaymentFailError(data.message || "This detail is already registered with another team.");
+        } else {
+          setDuplicateErrorInfo(null);
+          setPaymentFailError(data.error || "Registration could not be completed.");
+        }
         setShowPaymentFailModal(true);
       }
     } catch (err) {
       console.error('Registration failed:', err);
+      setDuplicateErrorInfo(null);
       setPaymentFailError("Network error during registration. Please try again.");
       setShowPaymentFailModal(true);
     } finally {
@@ -1426,10 +1438,10 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         )}
       </div>
 
-      {/* PAYMENT FAILURE POPUP MODAL */}
+      {/* PAYMENT FAILURE / DUPLICATE REGISTRATION POPUP MODAL */}
       {showPaymentFailModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
-          <div className="bg-slate-900 border border-red-500/80 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-[0_0_50px_rgba(239,68,68,0.4)] text-left relative">
+          <div className={`bg-slate-900 border ${duplicateErrorInfo?.isDuplicate ? 'border-amber-500/80 shadow-[0_0_50px_rgba(245,158,11,0.3)]' : 'border-red-500/80 shadow-[0_0_50px_rgba(239,68,68,0.4)]'} rounded-2xl max-w-md w-full p-6 space-y-4 text-left relative`}>
             <button
               onClick={() => setShowPaymentFailModal(false)}
               className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg bg-slate-800"
@@ -1437,47 +1449,93 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               <X className="w-4 h-4" />
             </button>
 
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-red-500/20 border border-red-500 flex items-center justify-center text-red-400 shrink-0">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-black text-white">Payment Verification Failed</h3>
-                <span className="text-[11px] text-red-400 font-mono font-bold">TRANSACTION_NOT_CONFIRMED</span>
-              </div>
-            </div>
+            {duplicateErrorInfo?.isDuplicate ? (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500 flex items-center justify-center text-amber-400 shrink-0">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white">Duplicate Registration</h3>
+                    <span className="text-[11px] text-amber-400 font-mono font-bold">ALREADY_REGISTERED</span>
+                  </div>
+                </div>
 
-            <div className="p-3.5 rounded-xl bg-red-950/40 border border-red-500/30 text-xs text-red-200 space-y-2">
-              <p className="font-semibold text-white">
-                {paymentFailError || "We could not verify this transaction reference on the PhonePe / UPI banking switch."}
-              </p>
-              <p className="text-[11px] text-slate-300">
-                Please check the following and retry:
-              </p>
-              <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300">
-                <li>Ensure the PhonePe payment of <strong>₹{currentFeePerParticipant} per participant</strong> was completed to <strong>kgsoumya1605@okicici</strong>.</li>
-                <li>Verify you entered all <strong>12 digits</strong> of the UTR correctly (e.g. 428901239812).</li>
-                <li>If payment was debited from your bank account, please wait 30 seconds and click Retry.</li>
-              </ul>
-            </div>
+                <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/30 text-xs text-amber-200 space-y-2">
+                  <p className="font-semibold text-white">
+                    {paymentFailError || "This detail is already registered."}
+                  </p>
+                  <p className="text-[11px] text-slate-300">
+                    Each participant must have a unique email address, USN, and phone number. Please review and update the duplicate information in your team details.
+                  </p>
+                </div>
 
-            <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
-              Need immediate help? Contact coordinators:
-              <div className="mt-1 font-mono text-cyan-300 font-bold">
-                Bhaskar S: +91 9663949447 | Dr. Sivasubramanyam: +91 8309763125
-              </div>
-            </div>
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
+                  Need immediate help? Contact coordinators:
+                  <div className="mt-1 font-mono text-cyan-300 font-bold">
+                    Bhaskar S: +91 9663949447 | Dr. Sivasubramanyam: +91 8309763125
+                  </div>
+                </div>
 
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowPaymentFailModal(false)}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow-lg transition-all"
-                id="retry-payment-modal-btn"
-              >
-                Re-enter UTR & Retry
-              </button>
-            </div>
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPaymentFailModal(false);
+                      setStep(2);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-lg transition-all"
+                    id="edit-duplicate-details-btn"
+                  >
+                    Review & Edit Team Details
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-red-500/20 border border-red-500 flex items-center justify-center text-red-400 shrink-0">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white">Payment Verification Failed</h3>
+                    <span className="text-[11px] text-red-400 font-mono font-bold">TRANSACTION_NOT_CONFIRMED</span>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-red-950/40 border border-red-500/30 text-xs text-red-200 space-y-2">
+                  <p className="font-semibold text-white">
+                    {paymentFailError || "We could not verify this transaction reference on the PhonePe / UPI banking switch."}
+                  </p>
+                  <p className="text-[11px] text-slate-300">
+                    Please check the following and retry:
+                  </p>
+                  <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300">
+                    <li>Ensure the PhonePe payment of <strong>₹{currentFeePerParticipant} per participant</strong> was completed to <strong>kgsoumya1605@okicici</strong>.</li>
+                    <li>Verify you entered all <strong>12 digits</strong> of the UTR correctly (e.g. 428901239812).</li>
+                    <li>If payment was debited from your bank account, please wait 30 seconds and click Retry.</li>
+                  </ul>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
+                  Need immediate help? Contact coordinators:
+                  <div className="mt-1 font-mono text-cyan-300 font-bold">
+                    Bhaskar S: +91 9663949447 | Dr. Sivasubramanyam: +91 8309763125
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPaymentFailModal(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow-lg transition-all"
+                    id="retry-payment-modal-btn"
+                  >
+                    Re-enter UTR & Retry
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

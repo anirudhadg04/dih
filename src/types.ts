@@ -39,8 +39,9 @@ export interface Team {
   createdAt: string;
   projectSubmitted?: boolean;
   paymentUtr?: string;
-  paymentStatus?: 'Pending' | 'Verified';
+  paymentStatus?: 'Pending' | 'Verified' | 'Rejected';
   paymentScreenshot?: string | null;
+  credentialDeliveryStatus?: 'queued' | 'accepted' | 'failed' | 'delivered';
 }
 
 export interface ProjectSubmission {
