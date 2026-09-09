@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import anvationNavbarLogo from '../assets/branding/anvation-navbar-logo.png';
 import { PortalView } from '../types';
 import { useTheme } from '../theme';
-import { User, FileText, Menu, X, Rocket, Sparkles, Clock, Globe } from 'lucide-react';
+import { User, FileText, Menu, X, Rocket, Sparkles, Clock } from 'lucide-react';
 
 interface NavbarProps {
   currentView: PortalView;
@@ -81,35 +81,27 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right Portal Switcher & Action CTAs */}
         <div className="hidden md:flex items-center gap-3">
-          {/* Portal Switcher Buttons */}
-          <div className="bg-slate-900/90 p-1 rounded-xl border border-slate-700/80 flex items-center gap-1 text-xs">
-            <button
-              onClick={() => setCurrentView('landing')}
-              className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all ${
-                currentView === 'landing'
-                  ? 'bg-gradient-to-r from-pink-600 via-fuchsia-600 to-rose-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-              id="nav-view-public-btn"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Event Home</span>
-            </button>
+          <button
+            onClick={onOpenRulebook}
+            className="flex items-center gap-1.5 text-orange-300 hover:text-orange-200 bg-orange-500/10 px-3 py-1.5 rounded-lg border border-orange-500/30 transition-all hover:bg-orange-500/20"
+            id="nav-rulebook-btn"
+          >
+            <FileText className="w-3.5 h-3.5 text-orange-400" />
+            <span>Rulebook</span>
+          </button>
 
-            <button
-              onClick={() => setCurrentView('participant')}
-              className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all ${
-                currentView === 'participant'
-                  ? 'bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-              id="nav-view-participant-btn"
-            >
-              <User className="w-3.5 h-3.5" />
-              <span>Participant Portal</span>
-            </button>
-
-          </div>
+          <button
+            onClick={() => setCurrentView('participant')}
+            className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all ${
+              currentView === 'participant'
+                ? 'bg-gradient-to-r from-orange-600 to-amber-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+            id="nav-view-participant-btn"
+          >
+            <User className="w-3.5 h-3.5" />
+            <span>Participant Login</span>
+          </button>
 
           {/* Primary Register CTA */}
           <button
@@ -178,34 +170,19 @@ export const Navbar: React.FC<NavbarProps> = ({
           Schedule
         </button>
 
-        <button 
-          onClick={onOpenRulebook} 
-          className="flex items-center gap-1.5 text-orange-300 hover:text-orange-200 bg-orange-500/10 px-3 py-1.5 rounded-full border border-orange-500/30 transition-all hover:bg-orange-500/20"
-          id="nav-rulebook-btn"
-        >
-          <FileText className="w-4 h-4 text-orange-400" />
-          <span>Rulebook</span>
-        </button>
       </nav>
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
         <div className="md:hidden bg-[var(--surface-drawer)] border-b border-cyan-500/30 px-4 py-6 space-y-4 animate-fadeIn">
           {/* Portal Switcher Mobile */}
-          <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 grid grid-cols-2 gap-1 text-center text-xs font-semibold">
-            <button
-              onClick={() => { setCurrentView('landing'); setMobileMenuOpen(false); }}
-              className={`py-2 rounded-lg ${currentView === 'landing' ? 'bg-cyan-600 text-white' : 'text-slate-400'}`}
-              id="mobile-portal-public-btn"
-            >
-              Event Home
-            </button>
+          <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 text-center text-xs font-semibold">
             <button
               onClick={() => { setCurrentView('participant'); setMobileMenuOpen(false); }}
-              className={`py-2 rounded-lg ${currentView === 'participant' ? 'bg-purple-600 text-white' : 'text-slate-400'}`}
+              className={`w-full py-2 rounded-lg ${currentView === 'participant' ? 'bg-purple-600 text-white' : 'text-slate-400'}`}
               id="mobile-portal-participant-btn"
             >
-              Participant
+              Participant Login
             </button>
           </div>
 
