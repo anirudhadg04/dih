@@ -861,14 +861,21 @@ export async function startServer() {
   const registeredPhones = new Set<string>();
   const registeredUsns = new Set<string>();
   const registeredUtrs = new Set<string>();
+  const registeredTeamNames = new Set<string>();
+
+  function normalizeTeamName(value: string): string {
+    return value.trim().replace(/\s+/g, " ").toLowerCase();
+  }
 
   function rebuildUniquenessIndexes() {
     registeredEmails.clear();
     registeredPhones.clear();
     registeredUsns.clear();
     registeredUtrs.clear();
+    registeredTeamNames.clear();
 
     for (const t of teams) {
+      if (t.teamName) registeredTeamNames.add(normalizeTeamName(String(t.teamName)));
       if (t.paymentUtr && t.paymentUtr !== "PENDING" && t.paymentUtr !== "SUBMITTED") {
         registeredUtrs.add(String(t.paymentUtr).trim().toUpperCase());
       }
@@ -925,6 +932,15 @@ export async function startServer() {
     const cleanTeamName = teamName.trim();
     if (cleanTeamName.length < 2 || cleanTeamName.length > 50) {
       return { valid: false, error: "Team name must be between 2 and 50 characters." };
+    }
+    if (registeredTeamNames.has(normalizeTeamName(cleanTeamName))) {
+      return {
+        valid: false,
+        isDuplicate: true,
+        field: "teamName",
+        fields: ["teamName"],
+        message: `The team name "${cleanTeamName}" is already registered. Team names must be unique; registration is first come, first served.`
+      };
     }
 
     // 2. Leader Validation

@@ -7,7 +7,7 @@ import { drawQRCode, gateQrDataUrl } from '../utils/qr';
 import { 
   User, Users, FileText, Upload, CheckCircle2, AlertCircle, 
   Clock, Sparkles, LogOut, Check, Shield, 
-  CheckSquare, Bell, Download, Cpu, MapPin, Radio, Lock, Eye, EyeOff, Key, Terminal, ExternalLink, MessageSquare, Edit3, Save, Plus, Trash2, X
+  CheckSquare, Bell, Download, Cpu, MapPin, Radio, Lock, Eye, EyeOff, Key, Terminal, ExternalLink, MessageSquare, Mail, Edit3, Save, Plus, Trash2, X
 } from 'lucide-react';
 
 interface ParticipantPortalProps {
@@ -108,6 +108,16 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
   const [gateQrReady, setGateQrReady] = useState(false);
 
   const currentTeam = allTeams.find(t => t.id === authenticatedTeamId) || allTeams[0] || SEED_TEAMS[0];
+  const recoveryIdentifier = loginTeamId.trim().toLowerCase();
+  const recoveryTeam = recoveryIdentifier
+    ? allTeams.find((team) => [team.id, team.regNumber, team.teamName, team.leaderEmail]
+      .filter(Boolean)
+      .some((value) => String(value).trim().toLowerCase() === recoveryIdentifier))
+    : undefined;
+  const leaderRecoveryEmail = recoveryTeam?.leaderEmail;
+  const recoveryMailto = leaderRecoveryEmail
+    ? `mailto:${leaderRecoveryEmail}?subject=${encodeURIComponent(`ANVATION 2026 portal password reset - ${recoveryTeam.id}`)}&body=${encodeURIComponent(`Hello ${recoveryTeam.teamName} team leader,\n\nPlease contact the event administrator to reset the Participant Portal password for team ${recoveryTeam.id} (${recoveryTeam.regNumber}).\n\nDo not send the current password by email.`)}`
+    : undefined;
 
   useEffect(() => {
     fetchData();
@@ -496,6 +506,26 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
               <Lock className="w-4 h-4" /> Authenticate & Access Station
             </button>
           </form>
+
+          <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-700/50 text-xs text-slate-300 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-amber-300">
+              <MessageSquare className="w-4 h-4" /> Forgot your team password?
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Enter your Team ID or registration number above, then email the team leader to request an admin reset.
+            </p>
+            {recoveryMailto ? (
+              <a
+                href={recoveryMailto}
+                className="inline-flex items-center gap-1.5 text-cyan-300 hover:text-cyan-200 font-bold"
+                id="participant-forgot-password-link"
+              >
+                <Mail className="w-3.5 h-3.5" /> Email team leader ({leaderRecoveryEmail})
+              </a>
+            ) : (
+              <span className="text-[11px] text-slate-500">A team leader email link will appear after you enter a valid Team ID.</span>
+            )}
+          </div>
 
         </div>
       </section>
