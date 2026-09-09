@@ -743,6 +743,13 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                       className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
                     />
                     <input
+                      type="tel"
+                      placeholder="Phone Number"
+                      value={mem.phone}
+                      onChange={(e) => handleUpdateMember(idx, 'phone', e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                    />
+                    <input
                       type="email"
                       placeholder="Email Address"
                       value={mem.email}
