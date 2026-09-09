@@ -51,6 +51,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   const [duplicateErrorInfo, setDuplicateErrorInfo] = useState<{ isDuplicate: boolean; field?: string; message?: string } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const paymentScreenshotInputRef = useRef<HTMLInputElement | null>(null);
+  const paymentScreenshotReadRef = useRef(0);
   // Guards against duplicate submissions (double-click or payment auto-fire)
   // so two concurrent/clustered registrations never create the same team twice.
   const submittingRef = useRef(false);
@@ -125,6 +127,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     setPaymentUtr('');
     setPaymentScreenshotData(null);
     setPaymentScreenshotName('');
+    paymentScreenshotReadRef.current += 1;
+    if (paymentScreenshotInputRef.current) paymentScreenshotInputRef.current.value = '';
     setLeader({
       fullName: '',
       college: '',
@@ -184,6 +188,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   const handlePaymentScreenshotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
+    // Clear the native value so selecting the same file after a rejection still fires onChange.
+    e.target.value = '';
     if (!file.type.startsWith('image/')) {
       alert('Please upload an image file (JPG, PNG, etc.) as payment proof.');
       return;
@@ -193,12 +199,24 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       alert('Screenshot too large. Please upload an image under 8 MB.');
       return;
     }
+    const readId = ++paymentScreenshotReadRef.current;
+    setPaymentScreenshotData(null);
+    setPaymentScreenshotName('');
+    setPaymentFailError(null);
+    setShowPaymentFailModal(false);
+    setPaymentVerifiedSuccess(false);
+    setPaymentConfirmed(false);
+    setPaymentVerifying(false);
+    setLoading(false);
     const reader = new FileReader();
     reader.onload = () => {
+      if (readId !== paymentScreenshotReadRef.current) return;
       setPaymentScreenshotData(String(reader.result));
       setPaymentScreenshotName(file.name);
     };
-    reader.onerror = () => alert('Could not read the file. Please try again.');
+    reader.onerror = () => {
+      if (readId === paymentScreenshotReadRef.current) alert('Could not read the file. Please try again.');
+    };
     reader.readAsDataURL(file);
   };
 
@@ -1038,6 +1056,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                     type="file"
                     accept="image/*"
                     onChange={handlePaymentScreenshotUpload}
+                    ref={paymentScreenshotInputRef}
                     className="w-full text-xs file:text-indigo-300 file:bg-indigo-950/40 file:border file:border-indigo-500/40 file:rounded-lg"
                     id="reg-payment-screenshot-input"
                   />
