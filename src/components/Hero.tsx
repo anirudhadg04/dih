@@ -201,27 +201,11 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
               <div className="absolute bottom-2 left-2 w-5 h-5 border-b-2 border-l-2 border-emerald-300 pointer-events-none" />
               <div className="absolute bottom-2 right-2 w-5 h-5 border-b-2 border-r-2 border-cyan-300 pointer-events-none" />
 
-              <div className="absolute inset-0 bg-[linear-gradient(115deg,transparent_30%,rgba(255,255,255,0.08)_45%,rgba(168,85,247,0.12)_50%,rgba(255,255,255,0.08)_55%,transparent_70%)] bg-[size:200%_100%] animate-laser-sweep pointer-events-none" />
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-to-r from-cyan-400/25 via-sky-300/25 to-fuchsia-400/25 rounded-full blur-3xl pointer-events-none animate-pulse-glow" />
+              
 
-              <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-cyan-950/80 text-cyan-200 font-black text-xs tracking-widest uppercase shadow-lg border border-cyan-400/40">
-                <Terminal className="w-3.5 h-3.5 text-cyan-300" />
-                <span className="font-['Orbitron',sans-serif] text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 via-rose-200 to-amber-200">explore • innovate • transform</span>
-              </div>
+             
 
-              {/* Laser Shimmer Sheen Sweep */}
-              <div className="absolute inset-0 bg-[linear-gradient(115deg,transparent_30%,rgba(255,255,255,0.08)_45%,rgba(168,85,247,0.12)_50%,rgba(255,255,255,0.08)_55%,transparent_70%)] bg-[size:200%_100%] animate-laser-sweep pointer-events-none" />
-
-              {/* Background Lighter Radial Aura */}
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-to-r from-cyan-400/25 via-sky-300/25 to-fuchsia-400/25 rounded-full blur-3xl pointer-events-none animate-pulse-glow" />
-
-              {/* Tagline Badge */}
-              <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-cyan-950/80 text-cyan-200 font-black text-xs tracking-widest uppercase shadow-lg border border-cyan-400/40">
-                <Terminal className="w-3.5 h-3.5 text-cyan-300" />
-                <span className="font-['Orbitron',sans-serif] text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 via-rose-200 to-amber-200">
-                  explore • innovate • transform
-                </span>
-              </div>
+              
 
               {/* Glowing Lighter Hackathon Title */}
               <div className="relative py-2">
@@ -241,10 +225,7 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
 
               {/* Key Badges Bar */}
               <div className="pt-2 flex flex-wrap items-center justify-center lg:justify-start gap-2.5">
-                <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-950/90 to-sky-950/70 border border-cyan-400/50 text-cyan-200 font-extrabold text-xs shadow-[0_0_18px_rgba(34,211,238,0.22)]">
-                  <Users className="w-4 h-4 text-cyan-300" />
-                  <span>Team: <span className="text-white font-black">2-4 Members</span></span>
-                </div>
+                
 
               
 
@@ -261,7 +242,7 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
             <div className="p-5 sm:p-6 lg:h-[453px] rounded-3xl bg-gradient-to-b from-slate-950/95 to-slate-950/90 backdrop-blur-xl border border-cyan-500/40 shadow-[0_0_40px_rgba(6,182,212,0.2)] space-y-4 card-gradient-border force-dark">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
+                  
                   <span className="font-mono text-[14px] font-black text-white tracking-wider uppercase">EVENT DETAILS</span>
                 </div>
       
@@ -339,39 +320,39 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
 
         </div>
 
-        {/* Countdown and requirements panel aligned below the hero cards */}
+        {/* Countdown and requirements panel aligned below the hero cards without resizing the existing windows */}
         <div className="flex justify-center">
           <div className="grid w-full max-w-[1280px] grid-cols-1 gap-4 justify-center lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
             <div className="p-4 h-[180px] w-full rounded-2xl bg-slate-950/90 backdrop-blur-xl border border-cyan-400/40 shadow-[0_0_30px_rgba(6,182,212,0.2)]">
-          <div className="text-xs font-extrabold text-cyan-300 uppercase tracking-widest mb-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="font-['Orbitron',sans-serif]">HACKATHON LAUNCH COUNTDOWN</span>
-            </div>
-            <span className="font-mono text-[10px] text-emerald-400">OCT 8, 2026 • 09:30 AM IST</span>
-          </div>
-          <div className="grid grid-cols-4 gap-2 text-center">
-            <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-cyan-950/60 border border-cyan-500/40 shadow-[inset_0_0_18px_rgba(34,211,238,0.14)]">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-300 to-sky-400" />
-              <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-cyan-200 to-cyan-400 ">{String(timeLeft.days).padStart(2, '0')}</div>
-              <div className="text-[10px] text-cyan-300/80 font-bold uppercase tracking-wider mt-0.5">DAYS</div>
-            </div>
-            <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-sky-950/60 border border-sky-500/40 shadow-[inset_0_0_18px_rgba(56,189,248,0.14)]">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-sky-300 to-indigo-400" />
-              <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-sky-200 to-sky-400">{String(timeLeft.hours).padStart(2, '0')}</div>
-              <div className="text-[10px] text-sky-300/80 font-bold uppercase tracking-wider mt-0.5">HOURS</div>
-            </div>
-            <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-emerald-950/60 border border-emerald-500/40 shadow-[inset_0_0_18px_rgba(52,211,153,0.14)]">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-300 to-teal-400" />
-              <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-emerald-200 to-emerald-400">{String(timeLeft.minutes).padStart(2, '0')}</div>
-              <div className="text-[10px] text-emerald-300/80 font-bold uppercase tracking-wider mt-0.5">MINUTES</div>
-            </div>
-            <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-rose-950/60 border border-amber-500/40 shadow-[inset_0_0_18px_rgba(251,191,36,0.14)] animate-pulse">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-300 to-rose-400" />
-              <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-amber-200 to-rose-400">{String(timeLeft.seconds).padStart(2, '0')}</div>
-              <div className="text-[10px] text-amber-300/80 font-bold uppercase tracking-wider mt-0.5">SECONDS</div>
-            </div>
-          </div>
+              <div className="text-xs font-extrabold text-cyan-300 uppercase tracking-widest mb-2.5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="font-['Orbitron',sans-serif]">HACKATHON LAUNCH COUNTDOWN</span>
+                </div>
+                <span className="font-mono text-[10px] text-emerald-400">OCT 8, 2026 • 09:30 AM IST</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-cyan-950/60 border border-cyan-500/40 shadow-[inset_0_0_18px_rgba(34,211,238,0.14)]">
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-300 to-sky-400" />
+                  <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-cyan-200 to-cyan-400 ">{String(timeLeft.days).padStart(2, '0')}</div>
+                  <div className="text-[10px] text-cyan-300/80 font-bold uppercase tracking-wider mt-0.5">DAYS</div>
+                </div>
+                <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-sky-950/60 border border-sky-500/40 shadow-[inset_0_0_18px_rgba(56,189,248,0.14)]">
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-sky-300 to-indigo-400" />
+                  <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-sky-200 to-sky-400">{String(timeLeft.hours).padStart(2, '0')}</div>
+                  <div className="text-[10px] text-sky-300/80 font-bold uppercase tracking-wider mt-0.5">HOURS</div>
+                </div>
+                <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-emerald-950/60 border border-emerald-500/40 shadow-[inset_0_0_18px_rgba(52,211,153,0.14)]">
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-300 to-teal-400" />
+                  <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-emerald-200 to-emerald-400">{String(timeLeft.minutes).padStart(2, '0')}</div>
+                  <div className="text-[10px] text-emerald-300/80 font-bold uppercase tracking-wider mt-0.5">MINUTES</div>
+                </div>
+                <div className="relative overflow-hidden p-2 h-[90px] sm:p-3 rounded-xl bg-gradient-to-b from-slate-900/90 to-rose-950/60 border border-amber-500/40 shadow-[inset_0_0_18px_rgba(251,191,36,0.14)] animate-pulse">
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-300 to-rose-400" />
+                  <div className="relative text-2xl sm:text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-amber-200 to-rose-400">{String(timeLeft.seconds).padStart(2, '0')}</div>
+                  <div className="text-[10px] text-amber-300/80 font-bold uppercase tracking-wider mt-0.5">SECONDS</div>
+                </div>
+              </div>
             </div>
 
             <div className="p-4 h-[180px] w-full rounded-2xl bg-gradient-to-b from-slate-950/95 to-slate-950/90 backdrop-blur-xl border border-violet-500/35 shadow-[0_0_24px_rgba(168,85,247,0.18)]">
@@ -381,10 +362,14 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
                   <span className="font-mono text-[14px] font-black text-white tracking-wider uppercase">REQUIREMENTS</span>
                 </div>
               </div>
+
               <div className="mt-3 grid grid-cols-3 gap-2 h-[calc(100%-52px)]">
                 {requirementItems.map((item) => (
-                  <div key={item.title} className="p-2 rounded-xl border border-cyan-500/25 bg-gradient-to-br from-slate-900/90 to-cyan-950/50 flex flex-col justify-center gap-2">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+                  <div
+                    key={item.title}
+                    className={`p-2 rounded-xl border bg-gradient-to-br from-slate-900/90 to-${item.accent === 'cyan' ? 'cyan-950/50' : item.accent === 'sky' ? 'sky-950/50' : 'emerald-950/50'} border-${item.accent === 'cyan' ? 'cyan-500/25' : item.accent === 'sky' ? 'sky-500/25' : 'emerald-500/25'} flex flex-col justify-center gap-2`}
+                  >
+                    <div className={`flex h-7 w-7 items-center justify-center rounded-lg bg-${item.accent}-500/10 border border-${item.accent}-500/30 text-${item.accent}-400`}>
                       <CheckCircle2 className="w-3.5 h-3.5" />
                     </div>
                     <div className="min-w-0">
@@ -397,8 +382,6 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
             </div>
           </div>
         </div>
-
-        
 
         {/* Bottom 4 Feature Cards Bar */}
         <div className="p-4 rounded-2xl bg-slate-950/70 backdrop-blur-md border border-slate-800">
