@@ -15,6 +15,7 @@ import { createWorker } from "tesseract.js";
 import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
+import { HACKATHON_TRACKS } from "./src/data/mockData";
 
 const execFileAsync = promisify(execFile);
 
@@ -960,6 +961,8 @@ export async function startServer() {
     return next;
   }
 
+  const validRegistrationDomains = new Set(HACKATHON_TRACKS.map((track) => track.title));
+
   // Registration payload and uniqueness validation
   function validateTeamRegistration(body: any): {
     valid: boolean;
@@ -973,7 +976,16 @@ export async function startServer() {
       return { valid: false, error: "Invalid registration payload." };
     }
 
-    const { teamName, preferredTrack, leader, members = [] } = body;
+    const { teamName, domain, preferredTrack, leader, members = [] } = body;
+    const selectedDomain = typeof domain === "string" && domain.trim()
+      ? domain.trim()
+      : typeof preferredTrack === "string"
+        ? preferredTrack.trim()
+        : "";
+
+    if (!validRegistrationDomains.has(selectedDomain)) {
+      return { valid: false, error: "A valid registration domain is required." };
+    }
 
     // 1. Team Name Validation
     if (!teamName || typeof teamName !== "string" || !teamName.trim()) {
@@ -1006,6 +1018,10 @@ export async function startServer() {
     if (!leader.usn?.trim()) {
       return { valid: false, error: "Leader USN / roll number is required." };
     }
+    const leaderPhone = String(leader.phone || "").replace(/[^0-9]/g, "");
+    if (leaderPhone.length < 7 || leaderPhone.length > 15) {
+      return { valid: false, error: "Valid leader phone number is required." };
+    }
 
     // 3. Team Size Validation (1 leader + 1 to 3 members = 2 to 4 total)
     if (!Array.isArray(members) || members.length < 1 || members.length > 3) {
@@ -1029,6 +1045,10 @@ export async function startServer() {
       }
       if (!m.usn?.trim()) {
         return { valid: false, error: `Member #${i + 2} USN / roll number is required.` };
+      }
+      const memberPhone = String(m.phone || "").replace(/[^0-9]/g, "");
+      if (memberPhone.length < 7 || memberPhone.length > 15) {
+        return { valid: false, error: `Valid Member #${i + 2} phone number is required.` };
       }
     }
 
@@ -1593,7 +1613,8 @@ export async function startServer() {
           return { status: 400, body: { success: false, error: teamValidation.error } };
         }
 
-        const { teamName, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentUtrConfirm, paymentAmount, paymentScreenshot } = req.body;
+        const { teamName, domain, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentUtrConfirm, paymentAmount, paymentScreenshot } = req.body;
+        const selectedDomain = typeof domain === "string" && domain.trim() ? domain.trim() : preferredTrack;
 
         // 2. Validate Payment UTR
         const utrValidation = validatePaymentUtr(paymentUtr, paymentUtrConfirm);
@@ -1680,7 +1701,8 @@ export async function startServer() {
           teamName: sanitizeInputString(teamName),
           leaderEmail: sanitizeInputString(leader.email.trim().toLowerCase()),
           accessPassword: hashPassword(accessPassword),
-          preferredTrack: sanitizeInputString(preferredTrack || 'Artificial Intelligence & Machine Learning'),
+          domain: sanitizeInputString(selectedDomain),
+          preferredTrack: sanitizeInputString(selectedDomain),
           members: [leaderParticipant, ...formattedMembers],
           status: 'Confirmed',
           createdAt: new Date().toISOString(),
@@ -2103,6 +2125,10 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         members: updateData.members ? updateData.members : existingTeam.members,
         updatedAt: new Date().toISOString()
       };
+      if (updateData.domain || updateData.preferredTrack) {
+        updatedTeam.domain = String(updateData.domain || updateData.preferredTrack);
+        updatedTeam.preferredTrack = updatedTeam.domain;
+      }
 
       // Keep leaderEmail in sync with leader participant if updated
       if (updatedTeam.members && updatedTeam.members.length > 0) {

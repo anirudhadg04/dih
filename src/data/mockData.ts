@@ -122,48 +122,6 @@ export const HACKATHON_TRACKS: HackathonTrack[] = [
     color: 'from-cyan-500 via-sky-600 to-indigo-600'
   },
   {
-    id: 'healthtech',
-    title: 'Healthcare & HealthTech',
-    iconName: 'Activity',
-    description: 'Revolutionize clinical diagnostics, telemedicine workflows, patient monitoring, and accessible medical intelligence.',
-    problemExamples: [
-      'Local edge AI ECG anomaly detector for primary health clinics',
-      'Dynamic emergency ambulance routing and hospital ICU bed allocation ledger',
-      'Clinical prescription OCR & adverse drug interaction detector'
-    ],
-    expectedSolutions: 'High-reliability mobile/web applications, biomedical IoT telemetry, or clinical triage dashboards.',
-    tags: ['TeleHealth', 'Biomedical AI', 'EHR Systems', 'Preventative Care'],
-    color: 'from-rose-500 via-pink-600 to-red-600'
-  },
-  {
-    id: 'edtech',
-    title: 'Education & EdTech',
-    iconName: 'BookOpen',
-    description: 'Reimagine interactive learning, automated code assessment, gamified STEM training, and personalized tutoring engines.',
-    problemExamples: [
-      'Adaptive AI tutor that personalizes coding feedback for vernacular engineering students',
-      'Interactive 3D virtual laboratory simulation for physics & electrical experiments',
-      'Automated grading & rubric evaluation pipeline for programming assignments'
-    ],
-    expectedSolutions: 'Gamified educational platforms, real-time feedback engines, or accessible mobile learning utilities.',
-    tags: ['Adaptive Learning', 'Virtual Labs', 'Gamification', 'Accessibility'],
-    color: 'from-amber-500 via-orange-600 to-yellow-600'
-  },
-  {
-    id: 'agritech',
-    title: 'Agriculture & AgriTech',
-    iconName: 'Sprout',
-    description: 'Modernize agriculture through IoT soil telemetry, drone aerial analysis, crop yield prediction, and direct fair marketplaces.',
-    problemExamples: [
-      'Low-cost ESP32 soil moisture sensor grid with automated solar pump triggers',
-      'Direct farm-to-retailer transparent marketplace eliminating predatory intermediaries',
-      'Drone hyperspectral crop disease detection & fertilizer dosage recommendation'
-    ],
-    expectedSolutions: 'Farmer-first multilingual apps, IoT sensor telemetry dashboards, or supply-chain logistics platforms.',
-    tags: ['Precision Agri', 'IoT Sensors', 'Yield Analytics', 'Direct Trade'],
-    color: 'from-emerald-500 via-teal-600 to-cyan-600'
-  },
-  {
     id: 'fintech',
     title: 'FinTech & Digital Finance',
     iconName: 'Coins',

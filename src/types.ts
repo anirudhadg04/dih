@@ -33,6 +33,7 @@ export interface Team {
   teamName: string;
   leaderEmail: string;
   accessPassword?: string;
+  domain?: string;
   preferredTrack: string;
   members: Participant[];
   status: 'Registered' | 'Shortlisted' | 'Confirmed' | 'Checked-In' | 'Submitted';

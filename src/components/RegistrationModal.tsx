@@ -60,7 +60,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
   // Form State
   const [teamName, setTeamName] = useState('');
-  const [preferredTrack, setPreferredTrack] = useState(HACKATHON_TRACKS[0].title);
+  const [domain, setDomain] = useState(HACKATHON_TRACKS[0].title);
   const [accommodationRequired, setAccommodationRequired] = useState(true);
   const [paymentUtr, setPaymentUtr] = useState('');
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
@@ -122,7 +122,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     setEditSlipForm(null);
     setSlipSaveSuccess(false);
     setTeamName('');
-    setPreferredTrack(HACKATHON_TRACKS[0].title);
+    setDomain(HACKATHON_TRACKS[0].title);
     setAccommodationRequired(true);
     setPaymentUtr('');
     setPaymentScreenshotData(null);
@@ -227,20 +227,23 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   const isLeaderValid = Boolean(
     leader.fullName.trim() &&
     leader.email.trim() &&
-    leader.usn.trim()
+    leader.usn.trim() &&
+    leader.phone.trim()
   );
 
   const areAllMembersFilled = members.length >= 1 && members.length <= 3 && members.every(m =>
-    Boolean(m.fullName.trim() && m.email.trim() && m.usn.trim())
+    Boolean(m.fullName.trim() && m.email.trim() && m.usn.trim() && m.phone.trim())
   );
 
   // Email and USN uniqueness check
   const allParticipantEmails = [leader.email.trim().toLowerCase(), ...members.map(m => m.email.trim().toLowerCase())].filter(Boolean);
   const allParticipantUsns = [leader.usn.trim().toUpperCase(), ...members.map(m => m.usn.trim().toUpperCase())].filter(Boolean);
+  const allParticipantPhones = [leader.phone.trim(), ...members.map(m => m.phone.trim())].filter(Boolean);
   const hasDuplicateEmail = new Set(allParticipantEmails).size !== allParticipantEmails.length;
   const hasDuplicateUsn = new Set(allParticipantUsns).size !== allParticipantUsns.length;
+  const hasDuplicatePhone = new Set(allParticipantPhones.map(phone => phone.replace(/[^0-9]/g, ''))).size !== allParticipantPhones.length;
 
-  const isStep3Valid = isLeaderValid && areAllMembersFilled && !hasDuplicateEmail && !hasDuplicateUsn;
+  const isStep3Valid = isLeaderValid && areAllMembersFilled && !hasDuplicateEmail && !hasDuplicateUsn && !hasDuplicatePhone;
 
   const handleSubmitRegistration = async (confirmedUtr?: string) => {
     // Double-submission lock: prevents rapid double-clicks or the 500ms
@@ -291,7 +294,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         },
         body: JSON.stringify({
           teamName: teamName || 'Anvation Innovators',
-          preferredTrack,
+          domain,
+          preferredTrack: domain,
           accommodationRequired,
           leader,
           members,
@@ -667,6 +671,21 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
             </div>
 
             <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">Project Domain (Required):</label>
+              <select
+                required
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm focus:border-cyan-500 focus:outline-none"
+                id="reg-domain-select"
+              >
+                {HACKATHON_TRACKS.map((track) => (
+                  <option key={track.id} value={track.title}>{track.title}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">Accommodation Required on Campus?</label>
               <select
                 value={accommodationRequired ? 'yes' : 'no'}
@@ -855,6 +874,12 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 <span>Duplicate USN detected. Each participant must have a unique roll number / USN.</span>
               </div>
             )}
+            {hasDuplicatePhone && (
+              <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Duplicate phone number detected. Each participant must have a unique contact number.</span>
+              </div>
+            )}
 
             <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
               {members.map((mem, idx) => (
@@ -902,6 +927,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                         required
                         value={mem.email}
                         onChange={(e) => handleUpdateMember(idx, 'email', e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Phone Number *</label>
+                      <input
+                        type="text"
+                        required
+                        value={mem.phone}
+                        onChange={(e) => handleUpdateMember(idx, 'phone', e.target.value)}
+                        placeholder="+91 9876543210"
                         className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
                       />
                     </div>

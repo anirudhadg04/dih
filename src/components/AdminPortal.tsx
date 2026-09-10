@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { SEED_TEAMS, SEED_SUBMISSIONS, SEED_ANNOUNCEMENTS } from '../data/mockData';
+import { SEED_TEAMS, SEED_SUBMISSIONS, SEED_ANNOUNCEMENTS, HACKATHON_TRACKS } from '../data/mockData';
 import { 
   Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, 
   MilestoneReport, WebsiteCMSConfig, Participant, AuditLog, AdminUser, 
@@ -1608,7 +1608,7 @@ export const AdminPortal: React.FC = () => {
                                 <span className="font-mono text-[10px] text-purple-400">({team.regNumber || team.id})</span>
                               </div>
                               <div className="text-[11px] text-slate-400">
-                                {team.preferredTrack} • {team.members.length} Members • {team.leaderEmail}
+                                {team.domain || team.preferredTrack} • {team.members.length} Members • {team.leaderEmail}
                               </div>
                             </div>
                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
@@ -1750,7 +1750,9 @@ export const AdminPortal: React.FC = () => {
                         p.fullName.toLowerCase().includes(participantSearch.toLowerCase()) ||
                         p.usn.toLowerCase().includes(participantSearch.toLowerCase()) ||
                         p.email.toLowerCase().includes(participantSearch.toLowerCase()) ||
-                        p.college.toLowerCase().includes(participantSearch.toLowerCase())
+                        p.college.toLowerCase().includes(participantSearch.toLowerCase()) ||
+                        p.phone.toLowerCase().includes(participantSearch.toLowerCase()) ||
+                        p.teamId.toLowerCase().includes(participantSearch.toLowerCase())
                       )
                       .sort((a, b) => {
                         switch (participantSort) {
@@ -1874,9 +1876,16 @@ export const AdminPortal: React.FC = () => {
                     </div>
 
                     <div className="text-xs space-y-1">
-                      <div className="text-slate-300">Track: <span className="text-purple-300 font-bold">{t.preferredTrack}</span></div>
+                      <div className="text-slate-300">Domain: <span className="text-purple-300 font-bold">{t.domain || t.preferredTrack || 'Not specified'}</span></div>
                       <div className="text-slate-400 text-[11px]">Leader Email: {t.leaderEmail}</div>
                       <div className="text-slate-400 text-[11px]">Members Count: {t.members.length} Hacker(s)</div>
+                      <div className="space-y-1 pt-1">
+                        {t.members.map((member, index) => (
+                          <div key={member.id} className="text-[11px] text-slate-400">
+                            <span className="text-slate-300 font-bold">Participant {index + 1}:</span> {member.fullName} · {member.email} · {member.phone || 'Phone not provided'}
+                          </div>
+                        ))}
+                      </div>
                       <div className="text-slate-400 text-[11px] flex items-center gap-1">Portal Password: <span className="text-emerald-300 font-mono font-bold">Stored securely</span></div>
                       <div className="text-slate-400 text-[11px]">Payment: <span className={t.paymentStatus === 'Verified' ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{t.paymentStatus || 'Verified'}</span> (UTR: {t.paymentUtr || 'N/A'})</div>
                     </div>
@@ -3802,19 +3811,13 @@ export const AdminPortal: React.FC = () => {
                   <div className="sm:col-span-2">
                     <label className="block text-xs font-bold text-slate-300 mb-1">Preferred Track Domain:</label>
                     <select
-                      value={editingTeam.preferredTrack}
-                      onChange={(e) => setEditingTeam({ ...editingTeam, preferredTrack: e.target.value })}
+                      value={editingTeam.domain || editingTeam.preferredTrack}
+                      onChange={(e) => setEditingTeam({ ...editingTeam, domain: e.target.value, preferredTrack: e.target.value })}
                       className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-bold focus:border-cyan-500 outline-none"
                     >
-                      <option value="Artificial Intelligence & Machine Learning">Artificial Intelligence & Machine Learning</option>
-                      <option value="Healthcare, Biotech & Assistive Tech">Healthcare, Biotech & Assistive Tech</option>
-                      <option value="EdTech & Smart Campus Automation">EdTech & Smart Campus Automation</option>
-                      <option value="AgriTech & Rural Empowerment">AgriTech & Rural Empowerment</option>
-                      <option value="FinTech & Blockchain Ecosystems">FinTech & Blockchain Ecosystems</option>
-                      <option value="Cybersecurity, Defense & Forensics">Cybersecurity, Defense & Forensics</option>
-                      <option value="Smart Cities, IoT & Transportation">Smart Cities, IoT & Transportation</option>
-                      <option value="CleanTech, Climate & Green Energy">CleanTech, Climate & Green Energy</option>
-                      <option value="Open Innovation & Social Impact">Open Innovation & Social Impact</option>
+                      {HACKATHON_TRACKS.map((track) => (
+                        <option key={track.id} value={track.title}>{track.title}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
