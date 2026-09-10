@@ -220,7 +220,7 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
               </div>
 
               <p className="max-w-2xl text-xs sm:text-base text-slate-200 leading-relaxed font-semibold">
-                Organized by the <strong>Department of Computer Science and Engineering</strong>, KSSEM, in association with the Departments of Artificial Intelligence and Data Science and Computer Science and Business Studies, in collaboration with Pygenicarc.
+                Organized by the <strong>Department of Computer Science and Engineering</strong>, KSSEM, in association with the Departments of Artificial Intelligence and Data Science and Computer Science and Business Studies, in collaboration with PyGenicArc Pvt. Ltd.
               </p>
 
               {/* Key Badges Bar */}

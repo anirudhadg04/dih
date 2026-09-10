@@ -126,7 +126,7 @@ export const AboutSection: React.FC = () => {
                     <MapPin className="w-4 h-4 text-pink-500" />
                     <span>KSSEM Campus, Kanakapura Road, Bengaluru</span>
                   </div>
-                  <p className="text-slate-300 mt-1">Official K. S. School of Engineering and Management Main Campus Building</p>
+                  <p className="text-slate-300 mt-1">K. S. School of Engineering and Management Main Campus</p>
                 </div>
               </div>
             </div>
