@@ -221,7 +221,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     reader.readAsDataURL(file);
   };
 
-  const currentFeePerParticipant = 1;
+  const currentFeePerParticipant = 250;
   const currentParticipantCount = 1 + members.length;
   const currentTotalFee = currentParticipantCount * currentFeePerParticipant;
 
@@ -415,11 +415,11 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
     const utrToVerify = (customUtr || paymentUtr || '').trim();
     const totalFee = currentTotalFee;
-    const validUtrPattern = /^[A-Z0-9]{12,22}$/i;
+    const validUtrPattern = /^[0-9]{12}$/;
 
     if (!utrToVerify || !validUtrPattern.test(utrToVerify)) {
       setPaymentVerifying(false);
-      setPaymentFailError("Enter the actual 12+ digit phonepe/UPI transaction reference from your payment receipt (letters/numbers only).");
+      setPaymentFailError("Enter the exact 12-digit transaction ID from your payment receipt (digits only, no spaces).");
       setShowPaymentFailModal(true);
       return;
     }
@@ -1063,7 +1063,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
                 <div className="space-y-1 pt-1">
                   <label className="text-xs font-bold text-slate-300 block">
-                    Or Enter 12-Digit PhonePe / UPI UTR Transaction Reference:
+                    Enter 12-Digit PhonePe / UPI Transaction ID:
                   </label>
                   <input
                     type="text"
@@ -1075,7 +1075,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                       if (paymentVerifiedSuccess) setPaymentVerifiedSuccess(false);
                       if (paymentConfirmed) setPaymentConfirmed(false);
                     }}
-                    placeholder="e.g. 434511786564 or UPI1234567890"
+                    placeholder="e.g. 129346921001"
                     className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono text-sm tracking-wider focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                     id="reg-payment-utr-input"
                   />

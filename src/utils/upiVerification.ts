@@ -1,47 +1,63 @@
 export const PAYMENT_UPI_ID = 'fcbizdgbveu@freecharge';
 
 const UPI_PATTERN = /([^\s@,;:()[\]{}]+)\s*@\s*([a-z0-9]+)(?![a-z0-9])/giu;
+const ALPHANUMERIC_RUN = /[a-z0-9]+/giu;
+const TRANSACTION_ID_PATTERN = /(?<!\d)\d{12}(?!\d)/g;
+const KSSEM_TOKEN_PATTERN = /(?<![a-z0-9])kssem(?![a-z0-9])/i;
+
+export function extractTransactionIds(ocrText: string): string[] {
+  return ocrText.match(TRANSACTION_ID_PATTERN) || [];
+}
+
+export function ocrContainsTransactionId(ocrText: string, transactionId: string): boolean {
+  return extractTransactionIds(ocrText).some((candidate) => candidate === transactionId);
+}
+
+export function ocrContainsKssemRecipient(ocrText: string): boolean {
+  return KSSEM_TOKEN_PATTERN.test(ocrText);
+}
 
 function normalizeCandidate(value: string): string {
   return value.toLowerCase().replace(/\s+/g, '');
 }
 
-function isRepeatedRedactionRun(value: string, start: number): boolean {
-  const character = value[start]?.toLocaleLowerCase();
-  if (!character || /[^a-z0-9]/u.test(character)) return true;
-  return value[start + 1]?.toLocaleLowerCase() === character;
+function visibleObservations(value: string): string[] {
+  const observations: string[] = [];
+  for (const run of value.match(ALPHANUMERIC_RUN) || []) {
+    let visible = '';
+    let index = 0;
+    while (index < run.length) {
+      let end = index + 1;
+      while (end < run.length && run[end].toLocaleLowerCase() === run[index].toLocaleLowerCase()) end += 1;
+      if (end - index === 1) visible += run[index];
+      else if (visible) {
+        observations.push(visible);
+        visible = '';
+      }
+      index = end;
+    }
+    if (visible) observations.push(visible);
+  }
+  return observations;
 }
 
 function matchesMaskedLocalPart(candidateLocal: string, expectedLocal: string): boolean {
-  let pattern = '^';
-  let visibleCharacterCount = 0;
-  let index = 0;
+  const observations = visibleObservations(candidateLocal);
+  const visibleCharacterCount = observations.reduce((total, observation) => total + observation.length, 0);
 
-  while (index < candidateLocal.length) {
-    const character = candidateLocal[index];
-    if (isRepeatedRedactionRun(candidateLocal, index)) {
-      let end = index + 1;
-      while (end < candidateLocal.length && candidateLocal[end].toLocaleLowerCase() === character.toLocaleLowerCase()) end += 1;
-      pattern += '[a-z0-9]+';
-      index = end;
-      continue;
-    }
+  // A redaction-only candidate has no reliable evidence for the payee.
+  if (visibleCharacterCount < 4) return false;
 
-    if (!/[a-z0-9]/iu.test(character)) {
-      pattern += '[a-z0-9]+';
-      index += 1;
-      continue;
-    }
-
-    visibleCharacterCount += 1;
-    pattern += character.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    index += 1;
+  // Each visible OCR run must be an in-order contiguous observation of the
+  // configured local part. Non-alphanumeric runs are unknown/redacted text.
+  let searchFrom = 0;
+  for (const observation of observations) {
+    const position = expectedLocal.indexOf(observation, searchFrom);
+    if (position === -1) return false;
+    searchFrom = position + observation.length;
   }
 
-  // A heavily obscured local part is not enough evidence to identify the payee.
-  if (visibleCharacterCount < 4) return false;
-  pattern += '$';
-  return new RegExp(pattern, 'i').test(expectedLocal);
+  return true;
 }
 
 export function ocrContainsExpectedUpi(ocrText: string, expectedUpi = PAYMENT_UPI_ID): boolean {

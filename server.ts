@@ -16,7 +16,7 @@ import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 import { HACKATHON_TRACKS } from "./src/data/mockData";
-import { PAYMENT_UPI_ID, ocrContainsExpectedUpi } from "./src/utils/upiVerification";
+import { PAYMENT_UPI_ID, ocrContainsTransactionId, ocrContainsKssemRecipient } from "./src/utils/upiVerification";
 
 const execFileAsync = promisify(execFile);
 
@@ -1848,8 +1848,8 @@ export async function startServer() {
       const { utr, amount, paymentScreenshot } = req.body;
       const feePerHead = Number(cmsConfig.registrationFee || 250);
       const expectedAmount = Number(amount) || (2 * feePerHead);
-      const cleanUtr = (utr ? String(utr).trim().toUpperCase() : '');
-      const validUtrPattern = /^[A-Z0-9]{12,22}$/i;
+      const cleanUtr = (utr ? String(utr).trim() : '');
+      const validUtrPattern = /^[0-9]{12}$/;
       const screenshotMatch = typeof paymentScreenshot === 'string'
         ? paymentScreenshot.match(/^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/i)
         : null;
@@ -1896,13 +1896,14 @@ export async function startServer() {
         return res.status(400).json({
           success: false,
           verified: false,
-          error: "Invalid UTR. Use the actual 12+ digit PhonePe/UPI transaction reference (letters/numbers only)."
+          error: "Invalid transaction ID. Enter exactly 12 digits with no spaces or letters."
         });
       }
 
       let proofText = "";
       try {
         proofText = await readPaymentProofText(screenshotBytes);
+        console.log("[PAYMENT OCR DEBUG] Extracted text:", JSON.stringify(proofText));
       } catch (ocrError: any) {
         console.error("[PAYMENT OCR] Could not read payment screenshot:", ocrError?.message || ocrError);
         return res.status(503).json({
@@ -1913,20 +1914,19 @@ export async function startServer() {
       }
 
       const proofTextCompact = proofText.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const expectedUtr = cleanUtr.toLowerCase().replace(/[^a-z0-9]/g, "");
       const expectedAmountText = String(expectedAmount).replace(/\.0+$/, "");
-      if (!proofTextCompact.includes(expectedUtr)) {
+      if (!ocrContainsTransactionId(proofText, cleanUtr)) {
         return res.status(400).json({
           success: false,
           verified: false,
-          error: "The uploaded payment screenshot does not contain the UTR you entered. Please upload the receipt for this transaction."
+          error: "The uploaded payment screenshot does not contain the exact 12-digit transaction ID you entered. Please upload the receipt for this transaction."
         });
       }
-      if (!ocrContainsExpectedUpi(proofText, PAYMENT_UPI_ID)) {
+      if (!ocrContainsKssemRecipient(proofText)) {
         return res.status(400).json({
           success: false,
           verified: false,
-          error: `The uploaded payment screenshot does not show the required PhonePe UPI ID ${PAYMENT_UPI_ID}.`
+          error: "The uploaded payment screenshot does not show the payment recipient KSSEM."
         });
       }
       if (!proofTextCompact.includes(expectedAmountText)) {
