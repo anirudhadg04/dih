@@ -3,7 +3,7 @@ import { COLLEGE_INFO } from '../data/mockData';
 import { Target, Eye, Award, MapPin } from 'lucide-react';
 import campusBgImage from '../assets/images/kssem_campus_real_1788194089427.jpg';
 import pygenarcBrandImage from '../assets/images/WhatsApp Image 2026-09-09 at 9.58.19 PM.jpeg';
-
+import hodimage from '../assets/images/hod.jpeg';
 export const AboutSection: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'college' | 'ksgi' | 'dept' | 'vision' | 'campus'>('college');
 
@@ -136,9 +136,11 @@ export const AboutSection: React.FC = () => {
             <div className="space-y-8">
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 p-6 rounded-2xl bg-gradient-to-r from-slate-800/90 via-slate-800/50 to-slate-800/90 border border-cyan-500/30">
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white font-black text-2xl shadow-lg border border-cyan-300/40">
-                    
-                  </div>
+                  <img
+                    src={hodimage}
+                    alt="Head of Department"
+                    className="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl object-cover shadow-lg border border-cyan-300/40"
+                  />
                   <div>
                     <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest block">Head of Department</span>
                     <h4 className="text-xl sm:text-2xl font-black text-white">{COLLEGE_INFO.hodName}</h4>
@@ -160,7 +162,7 @@ export const AboutSection: React.FC = () => {
                 </div>
               </div>
               <p className="text-slate-300 leading-relaxed text-sm sm:text-base">
-                Under the visionary leadership of <strong>{COLLEGE_INFO.hodName}</strong>, the Department of CSE at KSSEM is renowned for its academic rigor, state-of-the-art AI & Cloud labs, active IEEE/CIS and IEEE/RIS student chapters, and consistent placement track records in top tier MNCs and product unicorns.
+                The Department of Computer Science and Engineering (CSE) at KSSEM, under the visionary leadership of Dr. K. Venkata Rao, is committed to delivering quality education that develops strong technical knowledge, practical skills, and professional competence among students. The department is supported by state-of-the-art AI and Cloud laboratories, active IEEE/CIS and IEEE/RIS student chapters, and a strong track record of placements in top-tier MNCs and product unicorns. Through academic rigor, industry–academia interaction, interdisciplinary projects, research-oriented learning, and emphasis on soft skills, the department provides students with a well-rounded learning experience and prepares them to address evolving global challenges and excel as responsible Computer Science professionals.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">

@@ -58,6 +58,13 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
+  const navItems = [
+    { label: 'About', id: 'about' },
+    { label: 'Domains', id: 'tracks' },
+    { label: 'Prizes', id: 'prizes' },
+    { label: 'Schedule', id: 'timeline' },
+  ];
+
   return (
     <header className={`sticky top-0 z-50 transition-all duration-300 ${
       scrolled 
@@ -136,46 +143,23 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Desktop Navigation Sub-bar */}
+      {/* Shared Navigation Sub-bar */}
       <nav className="hidden lg:flex items-center justify-center gap-8 min-h-12 px-4 border-t border-slate-800/80 text-sm font-medium text-slate-300">
-        <button 
-          onClick={() => scrollToSection('about')} 
-          className="hover:text-pink-400 transition-colors py-2"
-          id="nav-about-btn"
-        >
-          About
-        </button>
-
-        <button 
-          onClick={() => scrollToSection('tracks')} 
-          className="hover:text-pink-400 transition-colors py-2"
-          id="nav-tracks-btn"
-        >
-          Domains
-        </button>
-
-        <button
-          onClick={() => scrollToSection('prizes')} 
-          className="hover:text-pink-400 transition-colors py-2"
-          id="nav-prizes-btn"
-        >
-          Prizes
-        </button>
-
-        <button 
-          onClick={() => scrollToSection('timeline')} 
-          className="hover:text-pink-400 transition-colors py-2"
-          id="nav-schedule-btn"
-        >
-          Schedule
-        </button>
-
+        {navItems.map(item => (
+          <button
+            key={item.id}
+            onClick={() => scrollToSection(item.id)}
+            className="hover:text-pink-400 transition-colors py-2"
+            id={`nav-${item.id}-btn`}
+          >
+            {item.label}
+          </button>
+        ))}
       </nav>
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
         <div className="md:hidden bg-[var(--surface-drawer)] border-b border-cyan-500/30 px-4 py-6 space-y-4 animate-fadeIn">
-          {/* Portal Switcher Mobile */}
           <div className="bg-slate-900 p-1.5 rounded-xl border border-slate-700 text-center text-xs font-semibold">
             <button
               onClick={() => { setCurrentView('participant'); setMobileMenuOpen(false); }}
@@ -187,12 +171,17 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="flex flex-col gap-3 font-medium text-slate-200 pt-2 border-t border-slate-800">
-            <button onClick={() => scrollToSection('about')} className="text-left py-2 hover:text-pink-400">About Anvation</button>
-            <button onClick={() => scrollToSection('tracks')} className="text-left py-2 hover:text-pink-400">8 Domains</button>
-            <button onClick={() => scrollToSection('prizes')} className="text-left py-2 hover:text-pink-400">Prize Pool</button>
-            <button onClick={() => scrollToSection('timeline')} className="text-left py-2 hover:text-pink-400">Schedule</button>
+            {navItems.map(item => (
+              <button
+                key={item.id}
+                onClick={() => scrollToSection(item.id)}
+                className="text-left py-2 hover:text-pink-400"
+              >
+                {item.label}
+              </button>
+            ))}
             <button onClick={onOpenRulebook} className="text-left py-2 text-orange-400 flex items-center gap-2">
-              <FileText className="w-4 h-4" /> Download Rulebook
+              <FileText className="w-4 h-4" /> Rulebook
             </button>
           </div>
         </div>
