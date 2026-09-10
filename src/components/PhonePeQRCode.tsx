@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { drawPhonePeQRCode } from '../utils/qr';
+import { PAYMENT_UPI_ID } from '../utils/upiVerification';
 import { Copy, Check, ExternalLink, Download, ShieldCheck, Sparkles } from 'lucide-react';
 
 interface PhonePeQRCodeProps {
@@ -12,7 +13,7 @@ interface PhonePeQRCodeProps {
 }
 
 export const PhonePeQRCode: React.FC<PhonePeQRCodeProps> = ({
-  upiId = 'fcbizdgbveu@freecharge',
+  upiId = PAYMENT_UPI_ID,
   name = 'KSSEM Anvation 2026',
   amount = '250',
   size = 240,
