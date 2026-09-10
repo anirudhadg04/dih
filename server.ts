@@ -710,7 +710,7 @@ export async function startServer() {
     },
     maxTeamSize: 4,
     minTeamSize: 2,
-    registrationFee: 1,
+    registrationFee: 250,
     gateScanSecretKey: "ANVATION-GATE-2026-KEY"
   };
 
@@ -1604,7 +1604,7 @@ export async function startServer() {
 
         // 3. Server-side fee calculation (never trust client amounts alone)
         const participantCount = 1 + members.length;
-        const feePerParticipant = Number(cmsConfig.registrationFee || 1);
+        const feePerParticipant = Number(cmsConfig.registrationFee || 250);
         const expectedTotalFee = participantCount * feePerParticipant;
         if (paymentAmount !== undefined && Number(paymentAmount) !== expectedTotalFee) {
           return {
@@ -1823,7 +1823,7 @@ export async function startServer() {
   app.post("/api/verify-payment", async (req, res) => {
     try {
       const { utr, amount, paymentScreenshot } = req.body;
-      const feePerHead = Number(cmsConfig.registrationFee || 1);
+      const feePerHead = Number(cmsConfig.registrationFee || 250);
       const expectedAmount = Number(amount) || (2 * feePerHead);
       const cleanUtr = (utr ? String(utr).trim().toUpperCase() : '');
       const validUtrPattern = /^[A-Z0-9]{12,22}$/i;
@@ -1904,7 +1904,7 @@ export async function startServer() {
         return res.status(400).json({
           success: false,
           verified: false,
-          error: "The uploaded payment screenshot does not show the required PhonePe UPI ID kgsoumya1605@okicici."
+          error: "The uploaded payment screenshot does not show the required PhonePe UPI ID fcbizdgbveu@freecharge."
         });
       }
       if (!proofTextCompact.includes(expectedAmountText)) {
@@ -1920,7 +1920,7 @@ export async function startServer() {
         verified: true,
         utr: cleanUtr,
         amount: expectedAmount,
-        beneficiary: "ANVATION 2026 (kgsoumya1605@okicici)",
+        beneficiary: "ANVATION 2026 (fcbizdgbveu@freecharge)",
         verifiedAt: new Date().toISOString(),
         message: `Payment proof OCR matched the UTR, beneficiary, and amount for ₹${expectedAmount}. Final settlement must still be confirmed by the admin desk.`
       });
@@ -1937,7 +1937,7 @@ export async function startServer() {
       res.json({
         success: true,
         listenerActive: true,
-        targetUpi: upiId || "kgsoumya1605@okicici",
+        targetUpi: upiId || "fcbizdgbveu@freecharge",
         amount: String(cmsConfig.registrationFee),
         suggestedUtr: ref,
         status: "WAITING_FOR_USER_CONFIRMATION"

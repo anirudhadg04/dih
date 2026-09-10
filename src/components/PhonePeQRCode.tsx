@@ -12,9 +12,9 @@ interface PhonePeQRCodeProps {
 }
 
 export const PhonePeQRCode: React.FC<PhonePeQRCodeProps> = ({
-  upiId = 'kgsoumya1605@okicici',
+  upiId = 'fcbizdgbveu@freecharge',
   name = 'KSSEM Anvation 2026',
-  amount = '1',
+  amount = '250',
   size = 240,
   showPayButton = true,
   onPaymentInitiated
@@ -121,7 +121,7 @@ export const PhonePeQRCode: React.FC<PhonePeQRCodeProps> = ({
         <div className="flex items-center justify-center gap-2 text-xs font-bold text-slate-700">
           <span>Fee:</span>
           <span className="text-emerald-700 text-sm font-extrabold bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
-            ₹{amount} (₹1 per participant)
+            ₹{amount} (₹250 per participant)
           </span>
         </div>
 

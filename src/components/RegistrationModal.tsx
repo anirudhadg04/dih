@@ -220,7 +220,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     reader.readAsDataURL(file);
   };
 
-  const currentFeePerParticipant = 1;
+  const currentFeePerParticipant = 250;
   const currentParticipantCount = 1 + members.length;
   const currentTotalFee = currentParticipantCount * currentFeePerParticipant;
 
@@ -979,7 +979,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               {/* PhonePe QR Component - EXACT UNALTERED QR */}
               <div>
                 <PhonePeQRCode
-                  upiId="kgsoumya1605@okicici"
+                  upiId="fcbizdgbveu@freecharge"
                   amount={String(currentTotalFee)}
                   size={190}
                   onPaymentInitiated={() => {
@@ -1020,7 +1020,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
                 <div className="p-2.5 rounded-xl bg-indigo-950/60 border border-indigo-500/20 text-xs text-slate-300 space-y-1">
                   <div className="font-bold text-white">Beneficiary: <span className="text-indigo-400">KSSEM Anvation 2026 Desk</span></div>
-                  <div>UPI ID: <span className="font-mono text-indigo-300">kgsoumya1605@okicici</span></div>
+                  <div>UPI ID: <span className="font-mono text-indigo-300">fcbizdgbveu@freecharge</span></div>
                   <div>Registration Fee: <span className="text-emerald-400 font-bold">₹{currentFeePerParticipant} per participant · ₹{currentTotalFee} total</span></div>
                 </div>
 
@@ -1544,7 +1544,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                     Please check the following and retry:
                   </p>
                   <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-300">
-                    <li>Ensure the PhonePe payment of <strong>₹{currentFeePerParticipant} per participant</strong> was completed to <strong>kgsoumya1605@okicici</strong>.</li>
+                    <li>Ensure the PhonePe payment of <strong>₹{currentFeePerParticipant} per participant</strong> was completed to <strong>fcbizdgbveu@freecharge</strong>.</li>
                     <li>Verify you entered all <strong>12 digits</strong> of the UTR correctly (e.g. 428901239812).</li>
                     <li>If payment was debited from your bank account, please wait 30 seconds and click Retry.</li>
                   </ul>

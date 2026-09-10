@@ -332,7 +332,7 @@ export const AdminPortal: React.FC = () => {
   const totalVerifiedParticipants = allParticipants.length;
   const totalColleges = new Set(allParticipants.map(p => p?.college).filter(Boolean)).size;
   const totalProjectsSubmitted = (submissions || []).length;
-  const totalRevenue = (teams || []).reduce((sum, team) => sum + team.members.length * (cmsConfig?.registrationFee || 1), 0);
+  const totalRevenue = (teams || []).reduce((sum, team) => sum + team.members.length * (cmsConfig?.registrationFee || 250), 0);
 
   // Super Admin Authentication Handlers
   const handleAdminLogin = async (e: React.FormEvent) => {
@@ -1532,7 +1532,7 @@ export const AdminPortal: React.FC = () => {
                   <div className="text-2xl font-black text-purple-300 mt-1">
                     ₹{totalRevenue.toLocaleString()}
                   </div>
-                    <div className="text-[10px] text-emerald-400 mt-1">₹{cmsConfig.registrationFee || 1} / Participant</div>
+                    <div className="text-[10px] text-emerald-400 mt-1">₹{cmsConfig.registrationFee || 250} / Participant</div>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md">
@@ -2927,8 +2927,8 @@ export const AdminPortal: React.FC = () => {
                       <label className="block text-xs font-bold text-slate-300 mb-1">Registration Fee Per Team (₹):</label>
                       <input
                         type="number"
-                        value={cmsConfig.registrationFee || 1}
-                        onChange={(e) => setCmsConfig({ ...cmsConfig, registrationFee: parseInt(e.target.value) || 1 })}
+                        value={cmsConfig.registrationFee || 250}
+                        onChange={(e) => setCmsConfig({ ...cmsConfig, registrationFee: parseInt(e.target.value) || 250 })}
                         className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-emerald-300 font-bold text-xs"
                       />
                     </div>
@@ -3362,7 +3362,7 @@ export const AdminPortal: React.FC = () => {
                 <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
                   <span className="text-[11px] text-slate-400 font-bold uppercase">Total Verified Revenue</span>
                   <div className="text-2xl font-black text-emerald-400 font-mono">
-                    ₹{teams.filter(t => t.paymentStatus === 'Verified').reduce((sum, team) => sum + team.members.length * (cmsConfig.registrationFee || 1), 0)}
+                    ₹{teams.filter(t => t.paymentStatus === 'Verified').reduce((sum, team) => sum + team.members.length * (cmsConfig.registrationFee || 250), 0)}
                   </div>
                   <p className="text-[10px] text-slate-500">{teams.filter(t => t.paymentStatus === 'Verified').length} Teams Verified</p>
                 </div>
@@ -3377,7 +3377,7 @@ export const AdminPortal: React.FC = () => {
 
                 <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
                   <span className="text-[11px] text-slate-400 font-bold uppercase">Fee Rate Per Team</span>
-                  <div className="text-2xl font-black text-cyan-300 font-mono">₹{cmsConfig.registrationFee || 1}</div>
+                  <div className="text-2xl font-black text-cyan-300 font-mono">₹{cmsConfig.registrationFee || 250}</div>
                   <p className="text-[10px] text-slate-500">UPI VPA: {cmsConfig.upiId || 'kssem.hacknove@upi'}</p>
                 </div>
               </div>
@@ -3406,7 +3406,7 @@ export const AdminPortal: React.FC = () => {
                             <div className="font-mono text-[10px] text-cyan-400">{t.id}</div>
                           </td>
                           <td className="p-3 text-slate-300 text-[11px]">{t.leaderEmail}</td>
-                          <td className="p-3 font-mono font-bold text-emerald-400">₹{t.members.length * (cmsConfig.registrationFee || 1)}</td>
+                          <td className="p-3 font-mono font-bold text-emerald-400">₹{t.members.length * (cmsConfig.registrationFee || 250)}</td>
                           <td className="p-3 font-mono text-amber-300 font-bold">{t.paymentUtr || 'N/A'}</td>
                           <td className="p-3">
                             {t.paymentScreenshot ? (
