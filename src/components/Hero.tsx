@@ -20,7 +20,7 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
 
   // Live CMS State
   const [cms, setCms] = useState({
-    eventName: "ANVATION",
+    eventName: "ANVATION 2026",
     eventSubName: "explore, innovate, transform",
     collegeName: "K. S. SCHOOL OF ENGINEERING AND MANAGEMENT",
     departmentName: "DEPARTMENT OF COMPUTER SCIENCE AND ENGINEERING",
