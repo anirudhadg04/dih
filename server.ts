@@ -16,6 +16,7 @@ import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 import { HACKATHON_TRACKS } from "./src/data/mockData";
+import { PAYMENT_UPI_ID, ocrContainsExpectedUpi } from "./src/utils/upiVerification";
 
 const execFileAsync = promisify(execFile);
 
@@ -1913,7 +1914,6 @@ export async function startServer() {
 
       const proofTextCompact = proofText.toLowerCase().replace(/[^a-z0-9]/g, "");
       const expectedUtr = cleanUtr.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const beneficiaryId = "kgsoumya1605okicici";
       const expectedAmountText = String(expectedAmount).replace(/\.0+$/, "");
       if (!proofTextCompact.includes(expectedUtr)) {
         return res.status(400).json({
@@ -1922,11 +1922,11 @@ export async function startServer() {
           error: "The uploaded payment screenshot does not contain the UTR you entered. Please upload the receipt for this transaction."
         });
       }
-      if (!proofTextCompact.includes(beneficiaryId)) {
+      if (!ocrContainsExpectedUpi(proofText, PAYMENT_UPI_ID)) {
         return res.status(400).json({
           success: false,
           verified: false,
-          error: "The uploaded payment screenshot does not show the required PhonePe UPI ID fcbizdgbveu@freecharge."
+          error: `The uploaded payment screenshot does not show the required PhonePe UPI ID ${PAYMENT_UPI_ID}.`
         });
       }
       if (!proofTextCompact.includes(expectedAmountText)) {
@@ -1942,7 +1942,7 @@ export async function startServer() {
         verified: true,
         utr: cleanUtr,
         amount: expectedAmount,
-        beneficiary: "ANVATION 2026 (fcbizdgbveu@freecharge)",
+        beneficiary: `ANVATION 2026 (${PAYMENT_UPI_ID})`,
         verifiedAt: new Date().toISOString(),
         message: `Payment proof OCR matched the UTR, beneficiary, and amount for ₹${expectedAmount}. Final settlement must still be confirmed by the admin desk.`
       });
@@ -1959,7 +1959,7 @@ export async function startServer() {
       res.json({
         success: true,
         listenerActive: true,
-        targetUpi: upiId || "fcbizdgbveu@freecharge",
+        targetUpi: upiId || PAYMENT_UPI_ID,
         amount: String(cmsConfig.registrationFee),
         suggestedUtr: ref,
         status: "WAITING_FOR_USER_CONFIRMATION"

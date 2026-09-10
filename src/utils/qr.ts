@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { PAYMENT_UPI_ID } from './upiVerification';
 
 /**
  * Utility to render a genuine, standards-compliant QR code onto an HTML Canvas.
@@ -76,7 +77,7 @@ export async function drawPhonePeQRCode(
   } = {}
 ) {
   const {
-    upiId = 'fcbizdgbveu@freecharge',
+    upiId = PAYMENT_UPI_ID,
     name = 'KSSEM Anvation 2026',
     amount = '250',
     size = 260,
