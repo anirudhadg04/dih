@@ -62,37 +62,34 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   // Form State
   const [teamName, setTeamName] = useState('');
   const [domain, setDomain] = useState(HACKATHON_TRACKS[0].title);
-  const [accommodationRequired, setAccommodationRequired] = useState(true);
   const [paymentUtr, setPaymentUtr] = useState('');
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [registrationFee, setRegistrationFee] = useState(0);
 
   // Leader State (Member 1)
   const [leader, setLeader] = useState({
     fullName: '',
-    college: '',
-    department: 'Computer Science & Engineering',
-    semester: '6th Semester',
     email: '',
     phone: '',
     usn: '',
-    gender: 'Male',
     githubUrl: '',
     linkedinUrl: '',
+    accommodationRequired: false,
     emergencyContact: ''
   });
 
   // Members State (1 to 3 additional members: Members 2, 3, 4)
   const createDefaultMembers = () => [
-    { fullName: '', email: '', phone: '', usn: '', college: '', gender: 'Male' }
+    { fullName: '', email: '', phone: '', usn: '', githubUrl: '', linkedinUrl: '', accommodationRequired: false, emergencyContact: '' }
   ];
 
-  const [members, setMembers] = useState<Array<{ fullName: string; email: string; phone: string; usn: string; college: string; gender: string }>>(
+  const [members, setMembers] = useState<Array<{ fullName: string; email: string; phone: string; usn: string; githubUrl: string; linkedinUrl: string; accommodationRequired: boolean; emergencyContact: string }>>(
     createDefaultMembers()
   );
 
   const handleAddMember = () => {
     if (members.length < 3) {
-      setMembers([...members, { fullName: '', email: '', phone: '', usn: '', college: '', gender: 'Male' }]);
+      setMembers([...members, { fullName: '', email: '', phone: '', usn: '', githubUrl: '', linkedinUrl: '', accommodationRequired: false, emergencyContact: '' }]);
     }
   };
 
@@ -124,7 +121,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     setSlipSaveSuccess(false);
     setTeamName('');
     setDomain(HACKATHON_TRACKS[0].title);
-    setAccommodationRequired(true);
     setPaymentUtr('');
     setPaymentScreenshotData(null);
     setPaymentScreenshotName('');
@@ -132,15 +128,12 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     if (paymentScreenshotInputRef.current) paymentScreenshotInputRef.current.value = '';
     setLeader({
       fullName: '',
-      college: '',
-      department: 'Computer Science & Engineering',
-      semester: '6th Semester',
       email: '',
       phone: '',
       usn: '',
-      gender: 'Male',
       githubUrl: '',
       linkedinUrl: '',
+      accommodationRequired: false,
       emergencyContact: ''
     });
     setMembers(createDefaultMembers());
@@ -152,6 +145,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       fetch('/api/registration-status')
         .then(res => res.json())
         .then(data => {
+          setRegistrationFee(Number(data?.registrationFee) || 0);
           if (data && (data.freezeRegistrations || !data.registrationOpen)) {
             setIsFrozen(true);
           } else {
@@ -221,7 +215,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     reader.readAsDataURL(file);
   };
 
-  const currentFeePerParticipant = 250;
+  const currentFeePerParticipant = registrationFee;
   const currentParticipantCount = 1 + members.length;
   const currentTotalFee = currentParticipantCount * currentFeePerParticipant;
 
@@ -297,11 +291,27 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
           teamName: teamName || 'Anvation Innovators',
           domain,
           preferredTrack: domain,
-          accommodationRequired,
-          leader,
-          members,
+          leader: {
+            fullName: leader.fullName,
+            email: leader.email,
+            phone: leader.phone,
+            usn: leader.usn,
+            githubUrl: leader.githubUrl,
+            linkedinUrl: leader.linkedinUrl,
+            accommodationRequired: leader.accommodationRequired,
+            emergencyContact: leader.emergencyContact
+          },
+          members: members.map((member) => ({
+            fullName: member.fullName,
+            email: member.email,
+            phone: member.phone,
+            usn: member.usn,
+            githubUrl: member.githubUrl,
+            linkedinUrl: member.linkedinUrl,
+            accommodationRequired: member.accommodationRequired,
+            emergencyContact: member.emergencyContact
+          })),
           paymentUtr: finalUtr,
-          paymentAmount: totalFee,
           paymentScreenshot: paymentScreenshotData || null
         })
       });
@@ -315,7 +325,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         // Gather all participant emails
         const allEmails = [
           leader.email,
-          ...members.map(m => m.email).filter(Boolean)
+          ...members.map((m: { email: string }) => m.email).filter(Boolean)
         ];
         setDispatchedRecipients(data.emailRecipients || allEmails);
 
@@ -334,7 +344,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               regNumber: data.team.regNumber,
               participants: [
                 { email: leader.email, name: leader.fullName, college: leader.college, role: 'Leader' },
-                ...members.map(m => ({ email: m.email, name: m.fullName, college: m.college, role: 'Member' }))
+                ...members.map((m: { email: string; fullName: string; college: string }) => ({ email: m.email, name: m.fullName, college: m.college, role: 'Member' }))
               ].filter(p => p.email)
             })
           });
@@ -434,7 +444,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           utr: utrToVerify,
-          amount: String(totalFee),
+          participantCount: currentParticipantCount,
           paymentScreenshot: paymentScreenshotData
         })
       });
@@ -459,6 +469,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         setPaymentFailError(data.error || "Payment verification failed: Transaction reference not found on UPI settlement network.");
         setShowPaymentFailModal(true);
         setPaymentVerifiedSuccess(false);
+        setPaymentConfirmed(false);
         setPaymentVerifying(false);
         verifyingRef.current = false;
       }
@@ -471,6 +482,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
           : `Payment verification failed: ${message}`
       );
       setShowPaymentFailModal(true);
+      setPaymentVerifiedSuccess(false);
+      setPaymentConfirmed(false);
       setPaymentVerifying(false);
       verifyingRef.current = false;
     }
@@ -686,19 +699,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">Accommodation Required on Campus?</label>
-              <select
-                value={accommodationRequired ? 'yes' : 'no'}
-                onChange={(e) => setAccommodationRequired(e.target.value === 'yes')}
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm focus:border-cyan-500 focus:outline-none"
-                id="reg-accommodation-select"
-              >
-                <option value="yes">Yes (Free Hostel Stay & Meals Provided)</option>
-                <option value="no">No (Local Day Scholar)</option>
-              </select>
-            </div>
-
             <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-200 space-y-1">
               <div className="font-bold text-white flex items-center gap-1.5">
                 <Shield className="w-3.5 h-3.5 text-cyan-400" />
@@ -782,42 +782,47 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Gender</label>
-                <select
-                  value={leader.gender}
-                  onChange={(e) => setLeader({ ...leader, gender: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-cyan-500 focus:outline-none"
-                  id="reg-leader-gender-select"
-                >
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
+                <label className="block text-xs font-bold text-slate-300 mb-1">GitHub URL</label>
+                <input
+                  type="url"
+                  value={leader.githubUrl}
+                  onChange={(e) => setLeader({ ...leader, githubUrl: e.target.value })}
+                  placeholder="https://github.com/username"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Department & Semester:</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1">LinkedIn URL</label>
                 <input
-                  type="text"
-                  required
-                  value={leader.department}
-                  onChange={(e) => setLeader({ ...leader, department: e.target.value })}
+                  type="url"
+                  value={leader.linkedinUrl}
+                  onChange={(e) => setLeader({ ...leader, linkedinUrl: e.target.value })}
+                  placeholder="https://linkedin.com/in/username"
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
-                  id="reg-leader-dept-input"
                 />
               </div>
 
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-slate-300 mb-1">College Name:</label>
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Emergency Contact</label>
                 <input
                   type="text"
-                  value={leader.college}
-                  onChange={(e) => setLeader({ ...leader, college: e.target.value })}
-                  placeholder="College / Institute Name"
+                  value={leader.emergencyContact}
+                  onChange={(e) => setLeader({ ...leader, emergencyContact: e.target.value })}
+                  placeholder="Name and phone number"
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
-                  id="reg-leader-college-input"
                 />
               </div>
+
+              <label className="flex items-center gap-2 text-xs text-slate-300 self-end pb-2">
+                <input
+                  type="checkbox"
+                  checked={leader.accommodationRequired}
+                  onChange={(e) => setLeader({ ...leader, accommodationRequired: e.target.checked })}
+                />
+                Accommodation required
+              </label>
+
             </div>
 
             <div className="flex gap-2">
@@ -943,27 +948,43 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Gender</label>
-                      <select
-                        value={mem.gender}
-                        onChange={(e) => handleUpdateMember(idx, 'gender', e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
-                      >
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">College / Institute Name</label>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">GitHub URL</label>
                       <input
-                        type="text"
-                        placeholder="College Name"
-                        value={mem.college}
-                        onChange={(e) => handleUpdateMember(idx, 'college', e.target.value)}
+                        type="url"
+                        value={mem.githubUrl}
+                        onChange={(e) => handleUpdateMember(idx, 'githubUrl', e.target.value)}
+                        placeholder="GitHub URL"
                         className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
                       />
                     </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">LinkedIn URL</label>
+                      <input
+                        type="url"
+                        value={mem.linkedinUrl}
+                        onChange={(e) => handleUpdateMember(idx, 'linkedinUrl', e.target.value)}
+                        placeholder="LinkedIn URL"
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Emergency Contact</label>
+                      <input
+                        type="text"
+                        value={mem.emergencyContact}
+                        onChange={(e) => handleUpdateMember(idx, 'emergencyContact', e.target.value)}
+                        placeholder="Name and phone"
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-[10px] text-slate-300 self-end pb-1.5">
+                      <input
+                        type="checkbox"
+                        checked={mem.accommodationRequired}
+                        onChange={(e) => handleUpdateMember(idx, 'accommodationRequired', e.target.checked)}
+                      />
+                      Accommodation required
+                    </label>
                   </div>
                 </div>
               ))}
@@ -1312,7 +1333,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-300">
                   <div><strong className="text-slate-400">Team Name:</strong> <span className="text-white font-bold">{registeredTeam.teamName}</span></div>
                   <div><strong className="text-slate-400">Track:</strong> <span className="text-purple-300 font-bold">{registeredTeam.preferredTrack}</span></div>
-                  <div><strong className="text-slate-400">Leader:</strong> <span className="text-white">{registeredTeam.members[0]?.fullName}</span> ({registeredTeam.members[0]?.gender || 'Male'} • {registeredTeam.members[0]?.usn})</div>
+                  <div><strong className="text-slate-400">Leader:</strong> <span className="text-white">{registeredTeam.members[0]?.fullName}</span> ({registeredTeam.members[0]?.usn})</div>
                   <div><strong className="text-slate-400">Payment UTR:</strong> <span className="text-emerald-400 font-mono font-bold">{registeredTeam.paymentUtr || paymentUtr}</span></div>
                   <div className="col-span-1 sm:col-span-2"><strong className="text-slate-400">College:</strong> {registeredTeam.members[0]?.college}</div>
                   <div className="col-span-1 sm:col-span-2 pt-1 border-t border-slate-800/80">
@@ -1321,11 +1342,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                       {registeredTeam.members.map((m: any, i: number) => (
                         <div key={i} className="flex flex-wrap justify-between items-center gap-x-4 gap-y-0.5 text-[11px] bg-slate-950/60 px-2.5 py-1.5 rounded-lg border border-slate-800">
                           <span>{i === 0 ? '👑 Leader' : `Member ${i+1}`}: <strong className="text-white">{m.fullName}</strong> ({m.usn})</span>
-                          <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
-                            String(m.gender).toLowerCase() === 'female'
-                              ? 'bg-pink-950/80 text-pink-300 border border-pink-700'
-                              : 'bg-cyan-950/80 text-cyan-300 border border-cyan-700'
-                          }`}>{m.gender || 'Male'}</span>
                           <span className="text-slate-400 font-mono">{m.email}</span>
                           <span className="text-slate-500 w-full sm:w-auto">🏫 {m.college || 'Not specified'}</span>
                         </div>
@@ -1445,19 +1461,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                             }}
                             className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
                           />
-                          <select
-                            value={mem.gender || 'Male'}
-                            onChange={(e) => {
-                              const updated = [...editSlipForm.members];
-                              updated[idx].gender = e.target.value;
-                              setEditSlipForm({ ...editSlipForm, members: updated });
-                            }}
-                            className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
-                          >
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                            <option value="Other">Other</option>
-                          </select>
                         </div>
                       </div>
                     ))}

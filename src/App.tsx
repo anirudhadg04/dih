@@ -229,14 +229,6 @@ export default function App() {
         <div className="relative z-10">
           {adminSessionState === 'checking' ? (
             <div className="min-h-[80vh] flex items-center justify-center text-cyan-300 font-mono text-sm">Checking admin session...</div>
-          ) : adminSessionState === 'participant' ? (
-            <div className="min-h-[80vh] flex items-center justify-center px-4">
-              <div className="max-w-md p-6 rounded-2xl bg-slate-900 border border-red-500/40 text-center space-y-3">
-                <h2 className="text-lg font-black text-white">Admin access denied</h2>
-                <p className="text-sm text-slate-300">Participant sessions cannot access the administrator portal.</p>
-                <button onClick={() => navigateToView('participant')} className="px-4 py-2 rounded-xl bg-cyan-600 text-white text-xs font-bold">Return to Participant Portal</button>
-              </div>
-            </div>
           ) : (
             <AdminPortal />
           )}

@@ -9,7 +9,6 @@ export interface Participant {
   email: string;
   phone: string;
   usn: string;
-  gender: string;
   githubUrl?: string;
   linkedinUrl?: string;
   role: 'Leader' | 'Member';
@@ -36,11 +35,12 @@ export interface Team {
   domain?: string;
   preferredTrack: string;
   members: Participant[];
-  status: 'Registered' | 'Shortlisted' | 'Confirmed' | 'Checked-In' | 'Submitted';
+  status: 'Registered' | 'Shortlisted' | 'Confirmed' | 'Checked-In' | 'Submitted' | 'Waitlist' | 'Disqualified';
   createdAt: string;
   projectSubmitted?: boolean;
   paymentUtr?: string;
   paymentStatus?: 'Pending' | 'Verified' | 'Rejected';
+  paymentAmountDetail?: string;
   paymentScreenshot?: string | null;
   credentialDeliveryStatus?: 'queued' | 'accepted' | 'failed' | 'delivered';
 }

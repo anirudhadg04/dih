@@ -286,10 +286,10 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
     setSavingSlip(true);
 
     try {
-      const res = await fetch(`/api/teams/${editingSlipData.id}`, {
+      const res = await fetch('/api/participant/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingSlipData)
+        body: JSON.stringify({ members: editingSlipData.members })
       });
 
       const data = await res.json();
@@ -1386,7 +1386,6 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                           email: '',
                           phone: '',
                           usn: '',
-                          gender: 'Male',
                           role: 'Member',
                           teamId: editingSlipData.id,
                           accommodationRequired: false,
@@ -1474,6 +1473,43 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                             className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
                           />
                         </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 border-t border-slate-800 pt-3">
+                        {([
+                          ['college', 'College / Institute'],
+                          ['department', 'Department'],
+                          ['semester', 'Semester'],
+                          ['githubUrl', 'GitHub URL'],
+                          ['linkedinUrl', 'LinkedIn URL'],
+                          ['emergencyContact', 'Emergency Contact']
+                        ] as const).map(([field, label]) => (
+                          <div key={field}>
+                            <label className="block text-[10px] text-slate-400 mb-0.5">{label}:</label>
+                            <input
+                              type="text"
+                              value={mem[field] || ''}
+                              onChange={(e) => {
+                                const updated = [...editingSlipData.members];
+                                updated[idx] = { ...updated[idx], [field]: e.target.value };
+                                setEditingSlipData({ ...editingSlipData, members: updated });
+                              }}
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                            />
+                          </div>
+                        ))}
+                        <label className="flex items-center gap-2 text-[10px] text-slate-300 sm:col-span-2">
+                          <input
+                            type="checkbox"
+                            checked={!!mem.accommodationRequired}
+                            onChange={(e) => {
+                              const updated = [...editingSlipData.members];
+                              updated[idx] = { ...updated[idx], accommodationRequired: e.target.checked };
+                              setEditingSlipData({ ...editingSlipData, members: updated });
+                            }}
+                          />
+                          Accommodation required
+                        </label>
                       </div>
                     </div>
                   ))}

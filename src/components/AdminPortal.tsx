@@ -3401,9 +3401,11 @@ export const AdminPortal: React.FC = () => {
                         <th className="p-3">Team ID & Name</th>
                         <th className="p-3">Leader Email</th>
                         <th className="p-3">Amount</th>
+                        <th className="p-3">Payment Detail</th>
                         <th className="p-3">UTR Reference No</th>
                         <th className="p-3">Screenshot</th>
                         <th className="p-3">Status</th>
+                        <th className="p-3">Team Status</th>
                         <th className="p-3">Action</th>
                       </tr>
                     </thead>
@@ -3416,6 +3418,7 @@ export const AdminPortal: React.FC = () => {
                           </td>
                           <td className="p-3 text-slate-300 text-[11px]">{t.leaderEmail}</td>
                           <td className="p-3 font-mono font-bold text-emerald-400">₹{t.members.length * (cmsConfig.registrationFee || 250)}</td>
+                          <td className="p-3 text-slate-300 text-[11px] min-w-48">{t.paymentAmountDetail || 'Not specified'}</td>
                           <td className="p-3 font-mono text-amber-300 font-bold">{t.paymentUtr || 'N/A'}</td>
                           <td className="p-3">
                             {t.paymentScreenshot ? (
@@ -3439,6 +3442,7 @@ export const AdminPortal: React.FC = () => {
                               {t.paymentStatus || 'Pending'}
                             </span>
                           </td>
+                          <td className="p-3 text-slate-300 text-[11px]">{t.status}</td>
                           <td className="p-3 flex items-center gap-2">
                             <button
                               onClick={() => handleVerifyUTR(t.id, 'Verified')}
@@ -3852,6 +3856,17 @@ export const AdminPortal: React.FC = () => {
                       className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-xs focus:border-cyan-500 outline-none"
                     />
                   </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Payment Amount Detail:</label>
+                    <input
+                      type="text"
+                      value={editingTeam.paymentAmountDetail || ''}
+                      onChange={(e) => setEditingTeam({ ...editingTeam, paymentAmountDetail: e.target.value })}
+                      placeholder="e.g. Verified UTR; registration amount INR 250 pending admin settlement"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-cyan-500 outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -3874,7 +3889,6 @@ export const AdminPortal: React.FC = () => {
                           email: '',
                           phone: '',
                           usn: '',
-                          gender: 'Male',
                           role: 'Member',
                           teamId: editingTeam.id,
                           accommodationRequired: false,

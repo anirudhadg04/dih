@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import nodemailer from "nodemailer";
 import QRCode from "qrcode";
+import sharp from "sharp";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
 import { createWorker } from "tesseract.js";
@@ -16,7 +17,7 @@ import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 import { HACKATHON_TRACKS } from "./src/data/mockData";
-import { PAYMENT_UPI_ID, ocrContainsTransactionId, ocrContainsKssemRecipient } from "./src/utils/upiVerification";
+import { PAYMENT_UPI_ID, ocrContainsTransactionId } from "./src/utils/upiVerification";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,8 +31,37 @@ async function readPaymentProofText(imageBytes: Buffer): Promise<string> {
     });
   }
   const worker = await paymentOcrWorkerPromise;
-  const result = await worker.recognize(imageBytes);
-  return String(result?.data?.text || "");
+  const normalized = sharp(imageBytes, { failOn: "none" });
+  const metadata = await normalized.metadata();
+  const width = Math.max(metadata.width || 0, 1600);
+  const height = metadata.height ? Math.round((metadata.height * width) / (metadata.width || width)) : width;
+  const baseVariants = await Promise.all([
+    normalized.clone().resize({ width }).png().toBuffer(),
+    normalized.clone().resize({ width }).grayscale().normalize().sharpen().png().toBuffer(),
+    normalized.clone().resize({ width }).grayscale().normalize().threshold(180).png().toBuffer()
+  ]);
+  const regions = [
+    { left: 0, top: 0, width, height },
+    { left: 0, top: 0, width, height: Math.max(1, Math.round(height * 0.45)) },
+    { left: 0, top: Math.round(height * 0.28), width, height: Math.max(1, Math.round(height * 0.45)) },
+    { left: 0, top: Math.round(height * 0.55), width, height: Math.max(1, height - Math.round(height * 0.55)) }
+  ];
+  const texts: string[] = [];
+  for (const variant of baseVariants) {
+    for (const [regionIndex, region] of regions.entries()) {
+      const regionImage = regionIndex === 0
+        ? variant
+        : await sharp(variant).extract(region).png().toBuffer();
+      const pageSegmentationMode = regionIndex === 0 ? "6" : "11";
+      const result = await worker.recognize(regionImage, {
+        tessedit_pageseg_mode: pageSegmentationMode
+      } as any);
+      const text = String(result?.data?.text || "").trim();
+      if (text) texts.push(text);
+
+    }
+  }
+  return texts.join("\n");
 }
 
 declare global {
@@ -745,16 +775,15 @@ export async function startServer() {
     "email",
     "phone",
     "usn",
-    "college",
     "department",
     "semester",
-    "gender",
     "github_url",
     "linkedin_url",
     "accommodation_required",
     "emergency_contact",
     "payment_utr",
     "payment_status",
+    "payment_amount_detail",
     "team_status"
   ];
 
@@ -794,16 +823,15 @@ export async function startServer() {
       member.email,
       member.phone,
       member.usn,
-      member.college,
       member.department,
       member.semester,
-      member.gender,
       member.githubUrl,
       member.linkedinUrl,
       member.accommodationRequired,
       member.emergencyContact,
       team.paymentUtr,
       team.paymentStatus,
+      team.paymentAmountDetail,
       team.status
     ];
     return row.map(csvCell).join(",");
@@ -821,7 +849,17 @@ export async function startServer() {
   const initialiseParticipantRegistrationBackup = () => {
     fs.mkdirSync(PARTICIPANT_BACKUP_DIR, { recursive: true, mode: 0o700 });
     const hasData = fs.existsSync(PARTICIPANT_BACKUP_FILE) && fs.statSync(PARTICIPANT_BACKUP_FILE).size > 0;
-    if (hasData) return;
+    if (hasData) {
+      const contents = fs.readFileSync(PARTICIPANT_BACKUP_FILE, "utf8");
+      if (!contents.split(/\r?\n/, 1)[0].includes(csvCell("payment_amount_detail"))) {
+        const migrated = contents.split(/\r?\n/).map((line, index) => {
+          if (!line) return line;
+          return index === 0 ? `${line},${csvCell("payment_amount_detail")}` : `${line},""`;
+        }).join("\n");
+        fs.writeFileSync(PARTICIPANT_BACKUP_FILE, migrated, { encoding: "utf8", mode: 0o600 });
+      }
+      return;
+    }
 
     // When first deployed, seed the CSV from previously persisted teams so the
     // backup is already complete before it starts receiving new registrations.
@@ -1143,8 +1181,8 @@ export async function startServer() {
       return { valid: false, error: "Payment UTR / transaction reference number is required." };
     }
     const cleanUtr = paymentUtr.trim().toUpperCase();
-    if (!/^[A-Z0-9]{12,22}$/.test(cleanUtr)) {
-      return { valid: false, error: "Invalid UTR format. Please provide a valid 12+ character alphanumeric UPI/PhonePe transaction reference." };
+    if (!/^\d{12}$/.test(cleanUtr)) {
+      return { valid: false, error: "Invalid UTR format. Enter exactly 12 digits." };
     }
     if (paymentUtrConfirm && typeof paymentUtrConfirm === "string" && paymentUtrConfirm.trim()) {
       const cleanConfirm = paymentUtrConfirm.trim().toUpperCase();
@@ -1292,7 +1330,8 @@ export async function startServer() {
       registrationOpen: cmsConfig.registrationOpen && !cmsConfig.freezeRegistrations,
       freezeRegistrations: !!cmsConfig.freezeRegistrations,
       totalTeams: teams.length,
-      maxRegistrations: cmsConfig.maxRegistrations || 100
+      maxRegistrations: cmsConfig.maxRegistrations || 100,
+      registrationFee: cmsConfig.registrationFee || 0
     });
   });
 
@@ -1614,7 +1653,7 @@ export async function startServer() {
           return { status: 400, body: { success: false, error: teamValidation.error } };
         }
 
-        const { teamName, domain, preferredTrack, leader, members = [], accommodationRequired, paymentUtr, paymentUtrConfirm, paymentAmount, paymentScreenshot } = req.body;
+        const { teamName, domain, preferredTrack, leader, members = [], paymentUtr, paymentUtrConfirm, paymentScreenshot } = req.body;
         const selectedDomain = typeof domain === "string" && domain.trim() ? domain.trim() : preferredTrack;
 
         // 2. Validate Payment UTR
@@ -1624,21 +1663,7 @@ export async function startServer() {
         }
         const cleanUtr = utrValidation.cleanUtr!;
 
-        // 3. Server-side fee calculation (never trust client amounts alone)
-        const participantCount = 1 + members.length;
-        const feePerParticipant = Number(cmsConfig.registrationFee || 250);
-        const expectedTotalFee = participantCount * feePerParticipant;
-        if (paymentAmount !== undefined && Number(paymentAmount) !== expectedTotalFee) {
-          return {
-            status: 400,
-            body: {
-              success: false,
-              error: `Payment amount mismatch: Expected ₹${expectedTotalFee} for ${participantCount} participants (₹${feePerParticipant} × ${participantCount}), but received ₹${paymentAmount}.`
-            }
-          };
-        }
-
-        // 4. Payment screenshot validation
+        // Payment screenshot validation
         if (!paymentScreenshot || String(paymentScreenshot).trim() === '') {
           return {
             status: 400,
@@ -1657,19 +1682,19 @@ export async function startServer() {
         const leaderParticipant: Participant = {
           id: `p-${teamIndex}-1`,
           fullName: sanitizeInputString(leader.fullName),
-          college: sanitizeInputString(leader.college || 'KS School of Engineering & Management'),
-          department: sanitizeInputString(leader.department || 'Computer Science & Engineering'),
-          semester: sanitizeInputString(leader.semester || '6th Semester'),
+          college: sanitizeInputString(leader.college || ''),
+          department: sanitizeInputString(leader.department || ''),
+          semester: sanitizeInputString(leader.semester || ''),
           email: sanitizeInputString(leader.email.trim().toLowerCase()),
           phone: sanitizeInputString(leader.phone || ''),
           usn: sanitizeInputString(leader.usn.trim().toUpperCase()),
-          gender: sanitizeInputString(leader.gender || 'Male'),
+          gender: sanitizeInputString(leader.gender || ''),
           githubUrl: sanitizeInputString(leader.githubUrl),
           linkedinUrl: sanitizeInputString(leader.linkedinUrl),
           role: 'Leader',
           teamId,
-          accommodationRequired: !!accommodationRequired,
-          emergencyContact: sanitizeInputString(leader.emergencyContact || leader.phone || ''),
+          accommodationRequired: !!leader.accommodationRequired,
+          emergencyContact: sanitizeInputString(leader.emergencyContact || ''),
           checkedIn: false,
           foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
         };
@@ -1677,19 +1702,19 @@ export async function startServer() {
         const formattedMembers: Participant[] = members.map((m: any, idx: number) => ({
           id: `p-${teamIndex}-${idx + 2}`,
           fullName: sanitizeInputString(m.fullName),
-          college: sanitizeInputString(m.college || leader.college || 'KSSEM'),
-          department: sanitizeInputString(m.department || 'CSE'),
-          semester: sanitizeInputString(m.semester || '6th Semester'),
+          college: sanitizeInputString(m.college || ''),
+          department: sanitizeInputString(m.department || ''),
+          semester: sanitizeInputString(m.semester || ''),
           email: sanitizeInputString(m.email.trim().toLowerCase()),
           phone: sanitizeInputString(m.phone || ''),
           usn: sanitizeInputString(m.usn.trim().toUpperCase()),
-          gender: sanitizeInputString(m.gender || 'Male'),
+          gender: sanitizeInputString(m.gender || ''),
           githubUrl: sanitizeInputString(m.githubUrl),
           linkedinUrl: sanitizeInputString(m.linkedinUrl),
           role: 'Member',
           teamId,
-          accommodationRequired: !!accommodationRequired,
-          emergencyContact: sanitizeInputString(m.emergencyContact || leader.phone || ''),
+          accommodationRequired: !!m.accommodationRequired,
+          emergencyContact: sanitizeInputString(m.emergencyContact || ''),
           checkedIn: false,
           foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
         }));
@@ -1710,6 +1735,7 @@ export async function startServer() {
           projectSubmitted: false,
           paymentUtr: cleanUtr,
           paymentStatus: 'Verified',
+          paymentAmountDetail: `Verified UTR; registration amount INR ${cmsConfig.registrationFee || 0} pending admin settlement`,
           paymentScreenshot: paymentScreenshot || null,
           credentialDeliveryStatus: 'queued'
         };
@@ -1765,7 +1791,6 @@ export async function startServer() {
           success: true,
           team: registrationTeam,
           accessPassword, // Return access password once upon registration
-          paymentAmount: expectedTotalFee,
           emailDispatched: true,
           emailRecipients: allTeamEmails.map(e => e.email),
           stats: {
@@ -1845,9 +1870,7 @@ export async function startServer() {
   // Verify PhonePe Payment Endpoint
   app.post("/api/verify-payment", async (req, res) => {
     try {
-      const { utr, amount, paymentScreenshot } = req.body;
-      const feePerHead = Number(cmsConfig.registrationFee || 250);
-      const expectedAmount = Number(amount) || (2 * feePerHead);
+      const { utr, paymentScreenshot } = req.body;
       const cleanUtr = (utr ? String(utr).trim() : '');
       const validUtrPattern = /^[0-9]{12}$/;
       const screenshotMatch = typeof paymentScreenshot === 'string'
@@ -1913,8 +1936,6 @@ export async function startServer() {
         });
       }
 
-      const proofTextCompact = proofText.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const expectedAmountText = String(expectedAmount).replace(/\.0+$/, "");
       if (!ocrContainsTransactionId(proofText, cleanUtr)) {
         return res.status(400).json({
           success: false,
@@ -1922,29 +1943,13 @@ export async function startServer() {
           error: "The uploaded payment screenshot does not contain the exact 12-digit transaction ID you entered. Please upload the receipt for this transaction."
         });
       }
-      if (!ocrContainsKssemRecipient(proofText)) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "The uploaded payment screenshot does not show the payment recipient KSSEM."
-        });
-      }
-      if (!proofTextCompact.includes(expectedAmountText)) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: `The uploaded payment screenshot does not show the expected payment amount of ₹${expectedAmount}.`
-        });
-      }
-
       res.json({
         success: true,
         verified: true,
         utr: cleanUtr,
-        amount: expectedAmount,
         beneficiary: `ANVATION 2026 (${PAYMENT_UPI_ID})`,
         verifiedAt: new Date().toISOString(),
-        message: `Payment proof OCR matched the UTR, beneficiary, and amount for ₹${expectedAmount}. Final settlement must still be confirmed by the admin desk.`
+        message: "Payment proof OCR matched the exact transaction ID. Final settlement must still be confirmed by the admin desk."
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -2144,6 +2149,36 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       res.json({ success: true, team: sanitizeTeamForClient(updatedTeam), message: "Team updated successfully" });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Participants complete optional profile fields after registration.
+  app.put("/api/participant/profile", requireAuth, (req, res) => {
+    try {
+      const teamId = String(req.session?.teamId || "").trim();
+      const index = teams.findIndex((team) => team.id.toLowerCase() === teamId.toLowerCase());
+      if (!teamId || index === -1) return res.status(404).json({ success: false, error: "Participant team not found." });
+
+      const submittedMembers = Array.isArray(req.body?.members) ? req.body.members : [];
+      const existingTeam = teams[index];
+      const submittedById = new Map<string, Record<string, any>>(submittedMembers.map((member: any) => [String(member.id), member]));
+      const profileFields = ["college", "department", "semester", "gender", "githubUrl", "linkedinUrl", "accommodationRequired", "emergencyContact"];
+      const updatedTeam: Team = {
+        ...existingTeam,
+        members: existingTeam.members.map((member) => {
+          const submitted = submittedById.get(member.id);
+          if (!submitted) return member;
+          const profile = Object.fromEntries(profileFields
+            .filter((field) => field in submitted)
+            .map((field) => [field, field === "accommodationRequired" ? !!submitted[field] : sanitizeInputString(submitted[field])])) as Partial<Participant>;
+          return { ...member, ...profile };
+        })
+      };
+      teams[index] = updatedTeam;
+      markDirty();
+      res.json({ success: true, team: sanitizeTeamForClient(updatedTeam) });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
