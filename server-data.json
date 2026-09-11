@@ -1,24 +1,24 @@
 {
   "teams": [
     {
-      "id": "AN-006",
-      "teamName": "CodeNova",
-      "leaderEmail": "anirudhaworks365@gmail.com",
-      "accessPassword": "pbkdf2_sha256$957815b994a7e8d34f23aeb7e1c17a95$3a25b1b6b31321051297a0830b4c9f409610a578cb131f1bc061617d5e31ae14",
+      "id": "AN-007",
+      "teamName": "CodeNova1",
+      "leaderEmail": "anirudha.gururaja@gmail.com",
+      "accessPassword": "pbkdf2_sha256$26fcf0ac8f69a3a7199c58a5ac513ab0$c521dea3c2c205247b56cce3612c6a75480fc8d7cf74063e513679c98516c541",
       "domain": "Artificial Intelligence & Machine Learning",
       "preferredTrack": "Artificial Intelligence & Machine Learning",
       "members": [
         {
-          "id": "p-6-1",
+          "id": "p-7-1",
           "fullName": "Anirudha Gururaja",
           "college": "ks",
           "state": "Karnataka",
-          "email": "anirudhaworks365@gmail.com",
-          "phone": "8660162988",
-          "usn": "12345",
+          "email": "anirudha.gururaja@gmail.com",
+          "phone": "3423423423",
+          "usn": "12345E2E2DWQ",
           "gender": "Male",
           "role": "Leader",
-          "teamId": "AN-006",
+          "teamId": "AN-007",
           "accommodationRequired": true,
           "checkedIn": false,
           "foodCouponsClaimed": {
@@ -30,16 +30,16 @@
           }
         },
         {
-          "id": "p-6-2",
+          "id": "p-7-2",
           "fullName": "Anirudha Gururaja",
           "college": "ks",
           "state": "Karnataka",
-          "email": "anirudhawrks365@gmail.com",
-          "phone": "8660162981",
-          "usn": "123456",
+          "email": "dja-djas-dojas@gmail.com",
+          "phone": "1234555555",
+          "usn": "12345678",
           "gender": "Female",
           "role": "Member",
-          "teamId": "AN-006",
+          "teamId": "AN-007",
           "accommodationRequired": true,
           "checkedIn": false,
           "foodCouponsClaimed": {
@@ -52,7 +52,7 @@
         }
       ],
       "status": "PENDING_PAYMENT_AUDIT",
-      "createdAt": "2026-09-11T14:51:49.846Z",
+      "createdAt": "2026-09-11T15:10:02.074Z",
       "projectSubmitted": false,
       "paymentUtr": "129346921001",
       "paymentStatus": "PENDING_PAYMENT_AUDIT",
@@ -76,7 +76,7 @@
       "status": "Active",
       "createdAt": "2026-08-01",
       "twoFactorEnabled": true,
-      "lastLogin": "2026-09-11T14:39:21.007Z"
+      "lastLogin": "2026-09-11T15:09:38.799Z"
     },
     {
       "id": "adm-2",
@@ -175,5 +175,5 @@
       "ipAddress": "192.168.1.10"
     }
   ],
-  "nextTeamNumber": 6
+  "nextTeamNumber": 7
 }
