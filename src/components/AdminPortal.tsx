@@ -1493,7 +1493,7 @@ export const AdminPortal: React.FC = () => {
                   <div className="text-[10px] font-bold text-slate-400 uppercase">Total Teams</div>
                   <div className="text-2xl font-black text-white mt-1">{teams.length}</div>
                   <div className="text-[10px] text-emerald-400 font-bold mt-1">
-                    {teams.length > 0 ? `${teams.filter(t => t.paymentStatus === 'Verified').length} Paid` : '0 Registered'}
+                    {teams.length > 0 ? `${teams.filter(t => t.paymentStatus === 'Verified' || t.paymentStatus === 'PAYMENT_APPROVED').length} Paid` : '0 Registered'}
                   </div>
                 </div>
 
@@ -1879,7 +1879,7 @@ export const AdminPortal: React.FC = () => {
                         ))}
                       </div>
                       <div className="text-slate-400 text-[11px] flex items-center gap-1">Portal Password: <span className="text-emerald-300 font-mono font-bold">Stored securely</span></div>
-                      <div className="text-slate-400 text-[11px]">Payment: <span className={t.paymentStatus === 'Verified' ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{t.paymentStatus || 'Verified'}</span> (UTR: {t.paymentUtr || 'N/A'})</div>
+                      <div className="text-slate-400 text-[11px]">Payment: <span className={t.paymentStatus === 'Verified' || t.paymentStatus === 'PAYMENT_APPROVED' ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{t.paymentStatus || 'Verified'}</span> (UTR: {t.paymentUtr || 'N/A'})</div>
                     </div>
 
                     <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-900">
@@ -3331,9 +3331,9 @@ export const AdminPortal: React.FC = () => {
                 <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
                   <span className="text-[11px] text-slate-400 font-bold uppercase">Total Verified Revenue</span>
                   <div className="text-2xl font-black text-emerald-400 font-mono">
-                    ₹{teams.filter(t => t.paymentStatus === 'Verified').reduce((sum, team) => sum + team.members.length * (cmsConfig.registrationFee || 250), 0)}
+                    ₹{teams.filter(t => t.paymentStatus === 'Verified' || t.paymentStatus === 'PAYMENT_APPROVED').reduce((sum, team) => sum + team.members.length * (cmsConfig.registrationFee || 250), 0)}
                   </div>
-                  <p className="text-[10px] text-slate-500">{teams.filter(t => t.paymentStatus === 'Verified').length} Teams Verified</p>
+                  <p className="text-[10px] text-slate-500">{teams.filter(t => t.paymentStatus === 'Verified' || t.paymentStatus === 'PAYMENT_APPROVED').length} Teams Verified</p>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
@@ -3395,10 +3395,10 @@ export const AdminPortal: React.FC = () => {
                           </td>
                           <td className="p-3">
                             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                              t.paymentStatus === 'Verified' ? 'bg-emerald-950 text-emerald-400 border-emerald-800' :
+                              t.paymentStatus === 'Verified' || t.paymentStatus === 'PAYMENT_APPROVED' ? 'bg-emerald-950 text-emerald-400 border-emerald-800' :
                               t.paymentStatus === 'Rejected' ? 'bg-red-950 text-red-400 border-red-800' :
                               'bg-amber-950 text-amber-300 border-amber-800'
-                            }`}>
+                            }`}> 
                               {t.paymentStatus || 'Pending'}
                             </span>
                           </td>

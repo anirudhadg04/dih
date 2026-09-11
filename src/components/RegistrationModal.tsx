@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { HACKATHON_TRACKS, COLLEGE_INFO, INDIA_STATES_AND_UTS } from '../data/mockData';
-import { drawQRCode, gateQrDataUrl } from '../utils/qr';
-import { printDocument } from '../utils/pdfGenerator';
 import {
   Rocket,
   CheckCircle2,
@@ -10,7 +8,6 @@ import {
   Shield,
   FileText,
   ArrowRight,
-  Download,
   Sparkles,
   Edit3,
   Save,
@@ -21,8 +18,6 @@ import {
   Check,
   CreditCard,
   RefreshCw,
-  Mail,
-  Eye,
 } from 'lucide-react';
 import { PhonePeQRCode } from './PhonePeQRCode';
 import { PAYMENT_UPI_ID } from '../utils/upiVerification';
@@ -53,25 +48,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
   const [paymentFailError, setPaymentFailError] = useState<string | null>(null);
   const [showPaymentFailModal, setShowPaymentFailModal] = useState(false);
 
-  // Automated Email State for All Team Members
-  const [dispatchedRecipients, setDispatchedRecipients] = useState<string[]>([]);
-  const [showEmailPreviewModal, setShowEmailPreviewModal] = useState(false);
-  // Locally-generated confirmation email (.eml) so participants can download it.
-  const [confirmationEmails, setConfirmationEmails] = useState<
-    Array<{ recipient: string; eml: string }>
-  >([]);
-  // Actual email delivery result from the server — used to truthfully tell the
-  // user whether the confirmation mail really reached inboxes (SMTP) or not.
-  const [emailDispatchInfo, setEmailDispatchInfo] = useState<{
-    delivered: number;
-    failed: number;
-    smtpConfigured: boolean;
-    transport?: string;
-    message?: string;
-    error?: string;
-  } | null>(null);
-  const [qrReady, setQrReady] = useState(false);
-
   // Payment proof screenshot upload — previewed on-screen and persisted to the
   // team's paymentScreenshot (base64 data URL) via /api/register.
   const [paymentScreenshotData, setPaymentScreenshotData] = useState<string | null>(null);
@@ -84,7 +60,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
   const [duplicateFieldErrors, setDuplicateFieldErrors] = useState<Record<string, string>>({});
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const paymentScreenshotInputRef = useRef<HTMLInputElement | null>(null);
   const paymentScreenshotReadRef = useRef(0);
   // Guards against duplicate submissions (double-click or payment auto-fire)
@@ -178,9 +153,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     setDuplicateFieldErrors({});
     setCheckingDuplicates(false);
     setRegisteredTeam(null);
-    setDispatchedRecipients([]);
-    setShowEmailPreviewModal(false);
-    setQrReady(false);
     setIsEditingSlip(false);
     setEditSlipForm(null);
     setSlipSaveSuccess(false);
@@ -221,21 +193,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     }
   }, [isOpen]);
 
-  useEffect(() => {
-    let mounted = true;
-    // Redraw the gate pass QR whenever the team changes OR the user returns from
-    // editing the slip (the canvas is unmounted during edit mode, so it must be
-    // re-rendered when the view comes back into focus).
-    if (registeredTeam && canvasRef.current) {
-      setQrReady(false);
-      drawQRCode(canvasRef.current, registeredTeam.id, 220).then(() => {
-        if (mounted) setQrReady(true);
-      });
-    }
-    return () => {
-      mounted = false;
-    };
-  }, [registeredTeam, isEditingSlip]);
 
   if (!isOpen) return null;
 
@@ -482,71 +439,9 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
       const data = await res.json();
       if (data.success && data.team) {
-        const registrationTeam = { ...data.team, accessPassword: data.accessPassword };
+        const registrationTeam = { ...data.team };
         setRegisteredTeam(registrationTeam);
         onSuccess(registrationTeam);
-
-        // Gather all participant emails
-        const allEmails = [
-          leader.email,
-          ...members.map((m: { email: string }) => m.email).filter(Boolean),
-        ];
-        setDispatchedRecipients(data.emailRecipients || allEmails);
-
-        // Direct Email Notification Dispatch to all participant emails (fully
-        // local — generates a downloadable .eml, no external API).
-        try {
-          const emailRes = await fetch('/api/send-registration-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              teamId: data.team.id,
-              emails: allEmails,
-              teamName: data.team.teamName,
-              domain: data.team.domain || data.team.preferredTrack,
-              password: data.accessPassword,
-              participants: [
-                {
-                  email: leader.email,
-                  name: leader.fullName,
-                  college: leader.college,
-                  role: 'Leader',
-                },
-                ...members.map((m: { email: string; fullName: string; college: string }) => ({
-                  email: m.email,
-                  name: m.fullName,
-                  college: m.college,
-                  role: 'Member',
-                })),
-              ].filter((p) => p.email),
-            }),
-          });
-          const emailData = await emailRes.json();
-          // Record the real delivery outcome so the success screen can show
-          // truthfully whether emails were actually sent (SMTP OK) or not.
-          setEmailDispatchInfo({
-            delivered: Number(emailData.deliveredCount) || 0,
-            failed: Number(emailData.failedCount) || 0,
-            smtpConfigured: emailData.smtpConfigured === true,
-            transport: emailData.transport,
-            message: emailData.gatewayMessage || emailData.message,
-            error: emailData.smtpError || emailData.error,
-          });
-          if (emailData.success && emailData.eml) {
-            const emailsReady = allEmails.map((recipient) => ({
-              recipient,
-              eml: emailData.eml,
-            }));
-            setConfirmationEmails(emailsReady);
-            if (emailData.emailRecipients) {
-              setDispatchedRecipients(
-                emailData.emailRecipients.map((r: any) => r.recipient)
-              );
-            }
-          }
-        } catch (mailErr) {
-          console.error('Email generation warning:', mailErr);
-        }
 
         setStep(5); // Go straight to confirmation slip!
         confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
@@ -689,19 +584,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     setSlipSaveSuccess(false);
   };
 
-  // Download the locally-generated confirmation email (.eml) for a recipient.
-  const downloadConfirmationEmail = (recipient: string, eml: string) => {
-    const blob = new Blob([eml], { type: 'message/rfc822' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ANVATION_2026_Registration_${recipient}.eml`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
   const handleSaveEditSlip = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editSlipForm || !registeredTeam) return;
@@ -732,96 +614,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     }
   };
 
-  const handlePrintSlip = async () => {
-    if (!registeredTeam) return;
-    const gateQrDataUrlStr = await gateQrDataUrl(registeredTeam.id, 220).catch(() => '');
-    const participantCount = registeredTeam.members?.length || 1;
-    const totalFee = participantCount * currentFeePerParticipant;
-    const slipHtml = `
-      <div style="text-align: center; margin-bottom: 20px;">
-        <h2 style="color: #0b192c; font-family: sans-serif;">ANVATION 2026 PARTICIPANT REGISTRATION SLIP</h2>
-        <div style="background: #0284c7; color: #ffffff; display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-family: monospace; margin-right: 8px;">
-          AUTO-ASSIGNED TEAM ID: ${registeredTeam.id}
-        </div>
-        <div style="background: #7e22ce; color: #ffffff; display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-family: monospace;">
-          ACCESS PASSWORD: ${registeredTeam.accessPassword || 'Unavailable - request an admin reset'}
-        </div>
-        <div style="background: #059669; color: #ffffff; display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; font-family: monospace; margin-top: 8px;">
-          VENUE ENTRY PASS: Gate scanner ready at KSSEM campus
-        </div>
-      </div>
-
-      <table>
-        <tr><th>Auto-Assigned Team ID</th><td><strong style="color: #0284c7; font-family: monospace;">${registeredTeam.id}</strong></td></tr>
-        <tr><th>Portal Access Password</th><td><strong style="color: #7e22ce; font-family: monospace;">${registeredTeam.accessPassword || 'Unavailable - request an admin reset'}</strong></td></tr>
-        <tr><th>Team Name</th><td><strong>${registeredTeam.teamName}</strong></td></tr>
-        <tr><th>Domain</th><td>${registeredTeam.domain || registeredTeam.preferredTrack}</td></tr>
-        <tr><th>Payment UTR Ref</th><td>${registeredTeam.paymentUtr || 'Verified (PhonePe)'}</td></tr>
-        <tr><th>Registration Fee</th><td>₹${totalFee} (₹${currentFeePerParticipant} × ${participantCount} participants)</td></tr>
-        <tr><th>Member 1 (Leader)</th><td>${registeredTeam.members[0]?.fullName} (${registeredTeam.members[0]?.email})</td></tr>
-        ${registeredTeam.members
-          .slice(1)
-          .map(
-            (m: any, idx: number) => `
-          <tr><th>Member ${idx + 2}</th><td>${m.fullName} (${m.usn || 'USN Provided'})</td></tr>
-        `
-          )
-          .join('')}
-        <tr><th>Leader College</th><td>${registeredTeam.members[0]?.college || 'Not specified'}</td></tr>
-        ${registeredTeam.members
-          .slice(1)
-          .map((m: any, idx: number) =>
-            m.college
-              ? `
-          <tr><th>Member ${idx + 2} College</th><td>${m.college}</td></tr>
-        `
-              : ''
-          )
-          .join('')}
-        <tr><th>Accommodation</th><td>${registeredTeam.members[0]?.accommodationRequired ? 'Free On-Campus Stay Requested' : 'Local Day Scholar'}</td></tr>
-      </table>
-
-      <div style="margin-top: 15px; padding: 12px; border: 1px dashed #7e22ce; border-radius: 8px; background: #faf5ff; font-size: 12px; color: #581c87;">
-        <strong>🔐 Dashboard Login Credentials:</strong> Use your <strong>Auto-Assigned Team ID (${registeredTeam.id})</strong> and the password shown above, or your Leader Email, to login to the Participant Portal to submit projects and track live rounds.
-      </div>
-
-      <div class="qr-box">
-        <h3 style="color: #0e7490; font-family: sans-serif; margin-bottom: 8px;">GATE ENTRY PASS QR</h3>
-        ${
-          gateQrDataUrlStr
-            ? `<img src="${gateQrDataUrlStr}" alt="Gate Entry QR Pass" style="width: 220px; height: 220px; image-rendering: pixelated; border: 8px solid #ffffff; outline: 1px solid #cbd5e1;" />`
-            : '<p>QR unavailable — show Team ID at the gate.</p>'
-        }
-        <p style="font-size: 12px; color: #475569;">Present this QR pass and college ID at the KSSEM Gate Check-in desk.</p>
-      </div>
-    `;
-
-    printDocument(`CodeAThon_Registration_Slip_${registeredTeam.id}`, slipHtml);
-  };
-
-  // Directly downloads the Gate Entry Pass (QR + Team ID) as a PNG image file —
-  // no print dialog needed, so the gate pass is always savable on the phone.
-  const handleDownloadGatePass = async () => {
-    if (!registeredTeam) return;
-    const qr = await gateQrDataUrl(registeredTeam.id, 320).catch(() => '');
-    const image = new Image();
-    image.src = qr;
-    image.onload = () => {
-      const link = document.createElement('a');
-      link.download = `ANVATION_2026_GatePass_${registeredTeam.id}.png`;
-      link.href = qr;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    };
-    if (!qr) {
-      alert(
-        'Could not generate the Gate Pass image. Show your Team ID at the gate (' +
-          registeredTeam.id +
-          ').'
-      );
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
@@ -1608,7 +1400,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
               </div>
             )}
 
-            {/* STEP 5 - SUCCESS & PASS */}
+            {/* STEP 5 - SUCCESS & WAITING FOR APPROVAL */}
             {step === 5 && registeredTeam && (
               <div className="space-y-6 text-center animate-fadeIn">
                 <div className="w-16 h-16 mx-auto rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.5)]">
@@ -1618,444 +1410,11 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                 <div>
                   <h3 className="text-2xl font-black text-white">Registration Confirmed!</h3>
                   <p className="text-xs text-slate-300 mt-1">
-                    Welcome to Anvation 2026 at KSSEM Bengaluru.
+                    Please wait for the admin's approval and keep checking your Gmail for further updates.
                   </p>
                 </div>
 
-                {/* EMAIL DISPATCH STATUS BANNER — shows the REAL delivery outcome.
-                    When SMTP is configured & mails are actually sent this shows
-                    "Delivered". Otherwise it honestly tells the user the mail was
-                    NOT delivered to inboxes (only a downloadable .eml was produced). */}
-                {(() => {
-                  const delivered = emailDispatchInfo?.delivered ?? 0;
-                  const failed = emailDispatchInfo?.failed ?? 0;
-                  const smtpConfigured = emailDispatchInfo?.smtpConfigured === true;
-                  const actuallySent = delivered > 0;
-                  const headerText = actuallySent
-                    ? `Confirmation email Delivered to ${delivered} participant${delivered === 1 ? '' : 's'}`
-                    : smtpConfigured
-                      ? 'Email delivery FAILED — not sent'
-                      : 'Confirmation email NOT delivered to inbox';
-                  const statusBadge = actuallySent ? (
-                    <span className="bg-emerald-500 text-slate-950 text-[9px] px-1.5 py-0.2 rounded font-black uppercase">
-                      Delivered
-                    </span>
-                  ) : smtpConfigured ? (
-                    <span className="bg-rose-600 text-white text-[9px] px-1.5 py-0.2 rounded font-black uppercase">
-                      Failed {failed}
-                    </span>
-                  ) : (
-                    <span className="bg-amber-500 text-slate-950 text-[9px] px-1.5 py-0.2 rounded font-black uppercase">
-                      Not configured
-                    </span>
-                  );
-                  return (
-                    <div
-                      className={`p-4 rounded-2xl text-left space-y-2.5 shadow-lg border ${
-                        actuallySent
-                          ? 'bg-gradient-to-r from-emerald-950/80 via-teal-950/80 to-cyan-950/80 border-emerald-500/50'
-                          : smtpConfigured
-                            ? 'bg-rose-950/40 border-rose-500/50'
-                            : 'bg-gradient-to-r from-cyan-950/80 via-blue-950/80 to-purple-950/80 border-cyan-500/50'
-                      }`}
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className={`w-8 h-8 rounded-lg ${
-                              actuallySent
-                                ? 'bg-emerald-900/60 border-emerald-500/50'
-                                : smtpConfigured
-                                  ? 'bg-rose-900/60 border-rose-500/50'
-                                  : 'bg-cyan-900/60 border-cyan-500/50'
-                            } border flex items-center justify-center shrink-0 ${
-                              actuallySent
-                                ? 'text-emerald-300'
-                                : smtpConfigured
-                                  ? 'text-rose-300'
-                                  : 'text-cyan-300'
-                            }`}
-                          >
-                            <Mail className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <span>{headerText}</span>
-                              {statusBadge}
-                            </div>
-                            <div className="text-[11px] text-slate-300">
-                              {actuallySent
-                                ? `The confirmation mail (with Gate Pass QR) was sent to your inbox. A copy is also available to download below.`
-                                : smtpConfigured
-                                  ? `Emails could NOT be sent — the SMTP account/app password is invalid. Use the Download below as proof of registration at the gate.`
-                                  : `Your confirmation mail was NOT sent to your inbox (SMTP not configured). Please download the .eml below / use the Gate Pass QR on this page at the venue.`}
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowEmailPreviewModal(true)}
-                          className="px-3 py-1.5 rounded-lg bg-cyan-900/80 hover:bg-cyan-800 text-cyan-200 text-xs font-bold border border-cyan-600 flex items-center gap-1.5 shrink-0 self-start sm:self-auto shadow"
-                          id="view-email-preview-btn"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Preview Email</span>
-                        </button>
-                      </div>
-
-                      {emailDispatchInfo?.message && (
-                        <div
-                          className={`text-[10px] leading-relaxed px-2.5 py-1.5 rounded-lg border ${
-                            actuallySent
-                              ? 'bg-emerald-950/50 border-emerald-800 text-emerald-200'
-                              : smtpConfigured
-                                ? 'bg-rose-950/50 border-rose-800 text-rose-200'
-                                : 'bg-slate-950/60 border-slate-700 text-slate-300'
-                          }`}
-                        >
-                          {emailDispatchInfo.message}
-                        </div>
-                      )}
-
-                      {/* List of Recipient Emails with per-recipient .eml download */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 border-t border-slate-800/40 text-[11px]">
-                        {registeredTeam.members.map((m: any, idx: number) => {
-                          const emailItem = confirmationEmails.find(
-                            (c) => c.recipient === m.email
-                          );
-                          return (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between bg-slate-950/70 px-2.5 py-1 rounded-lg border border-slate-800"
-                            >
-                              <span className="text-slate-300 font-mono truncate mr-2">
-                                {m.email}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  emailItem && downloadConfirmationEmail(m.email, emailItem.eml)
-                                }
-                                disabled={!emailItem}
-                                className="text-emerald-400 font-bold text-[10px] shrink-0 hover:text-emerald-300 disabled:opacity-50 disabled:hover:text-emerald-400 flex items-center gap-1"
-                              >
-                                <Download className="w-3 h-3" />{' '}
-                                {emailItem ? 'Download .eml' : 'Pending'}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {slipSaveSuccess && (
-                  <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500 text-emerald-300 text-xs font-bold animate-fadeIn">
-                    ✓ Registration slip details updated and synchronized with backend database!
-                  </div>
-                )}
-
-                {!isEditingSlip ? (
-                  /* SLIP VIEW MODE */
-                  <div className="p-5 rounded-2xl bg-slate-900 border border-cyan-500/40 text-left space-y-4 shadow-xl">
-                    <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                      <div>
-                        <span className="text-[10px] text-cyan-400 font-bold block uppercase tracking-wider font-mono">
-                          ⚡ AUTO-ASSIGNED TEAM ID
-                        </span>
-                        <span className="text-2xl font-black text-cyan-400 font-mono tracking-tight">
-                          {registeredTeam.id}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={handleStartEditSlip}
-                          className="px-3 py-1.5 rounded-xl bg-cyan-950 hover:bg-cyan-900 border border-cyan-700/70 text-cyan-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
-                          id="edit-reg-slip-btn"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>Edit Slip Details</span>
-                        </button>
-                        <div className="text-right"></div>
-                      </div>
-                    </div>
-
-                    {/* Secure Portal Access Credentials Card */}
-                    <div className="p-3.5 rounded-xl bg-purple-950/40 border border-purple-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <Shield className="w-4 h-4 text-purple-400" />
-                          <span className="font-mono font-bold text-purple-300 uppercase tracking-wider text-[10px]">
-                            PORTAL ACCESS CREDENTIALS
-                          </span>
-                        </div>
-                        <div className="mt-1 space-x-2">
-                          <span className="text-slate-300">
-                            Team ID:{' '}
-                            <strong className="text-cyan-300 font-mono">
-                              {registeredTeam.id}
-                            </strong>
-                          </span>
-                          <span className="text-slate-500">•</span>
-                          <span className="text-slate-300">
-                            Password:{' '}
-                            <strong className="text-purple-300 font-mono bg-purple-900/60 px-2 py-0.5 rounded border border-purple-700">
-                              {registeredTeam.accessPassword ||
-                                'Unavailable - request an admin reset'}
-                            </strong>
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 mt-1">
-                          Use this Password to sign in to the Participant Dashboard & submit
-                          projects.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(
-                            `Team ID: ${registeredTeam.id}\nPassword: ${
-                              registeredTeam.accessPassword ||
-                              'Unavailable - request an admin reset'
-                            }\nLeader Email: ${registeredTeam.leaderEmail}`
-                          );
-                          alert('Credentials copied to clipboard!');
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-purple-900 hover:bg-purple-800 text-purple-200 text-xs font-bold font-mono shrink-0 border border-purple-600"
-                      >
-                        Copy Credentials
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-300">
-                      <div>
-                        <strong className="text-slate-400">Team Name:</strong>{' '}
-                        <span className="text-white font-bold">{registeredTeam.teamName}</span>
-                      </div>
-                      <div>
-                        <strong className="text-slate-400">Domain:</strong>{' '}
-                        <span className="text-purple-300 font-bold">
-                          {registeredTeam.domain || registeredTeam.preferredTrack}
-                        </span>
-                      </div>
-                      <div>
-                        <strong className="text-slate-400">Leader:</strong>{' '}
-                        <span className="text-white">
-                          {registeredTeam.members[0]?.fullName}
-                        </span>{' '}
-                        ({registeredTeam.members[0]?.usn})
-                      </div>
-                      <div>
-                        <strong className="text-slate-400">Payment UTR:</strong>{' '}
-                        <span className="text-emerald-400 font-mono font-bold">
-                          {registeredTeam.paymentUtr || paymentUtr}
-                        </span>
-                      </div>
-                      <div className="col-span-1 sm:col-span-2">
-                        <strong className="text-slate-400">College:</strong>{' '}
-                        {registeredTeam.members[0]?.college}
-                      </div>
-                      <div className="col-span-1 sm:col-span-2 pt-1 border-t border-slate-800/80">
-                        <strong className="text-slate-400 block mb-1">
-                          Registered Hacker(s) (6 Participants):
-                        </strong>
-                        <div className="space-y-1">
-                          {registeredTeam.members.map((m: any, i: number) => (
-                            <div
-                              key={i}
-                              className="flex flex-wrap justify-between items-center gap-x-4 gap-y-0.5 text-[11px] bg-slate-950/60 px-2.5 py-1.5 rounded-lg border border-slate-800"
-                            >
-                              <span>
-                                {i === 0 ? '👑 Leader' : `Member ${i + 1}`}:{' '}
-                                <strong className="text-white">{m.fullName}</strong> ({m.usn})
-                              </span>
-                              <span className="text-slate-400 font-mono">{m.email}</span>
-                              <span className="text-slate-500 w-full sm:w-auto">
-                                🏫 {m.college || 'Not specified'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Generated QR Canvas */}
-                    <div className="pt-2 text-center border-t border-slate-800/80">
-                      <div className="mb-3 rounded-xl border border-amber-400/40 bg-amber-950/20 px-3 py-2 text-left">
-                        <div className="text-[10px] font-black uppercase tracking-widest text-amber-300">
-                          Gate Entry Pass QR
-                        </div>
-                        <div className="text-[11px] text-slate-300">
-                          Show this QR code at the KSSEM entrance gate. It is also included in the
-                          printable pass.
-                        </div>
-                      </div>
-                      <canvas
-                        ref={canvasRef}
-                        className="mx-auto rounded-xl border border-slate-700 shadow-md"
-                      />
-                      <span className="text-[10px] text-slate-400 block mt-1">
-                        {qrReady
-                          ? 'Ready to scan at KSSEM Venue Check-in Gate'
-                          : 'Generating secure gate pass QR...'}
-                      </span>
-
-                      {/* Direct Gate Pass PNG download — always available & visible */}
-                      <button
-                        type="button"
-                        onClick={handleDownloadGatePass}
-                        disabled={!qrReady}
-                        className="mt-3 w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-black text-xs flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 transition-all"
-                        id="reg-download-gatepass-btn"
-                      >
-                        <Download className="w-4 h-4" />
-                        <span>Download Gate Pass (Save on your phone)</span>
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  /* SLIP EDIT MODE */
-                  <form
-                    onSubmit={handleSaveEditSlip}
-                    className="p-5 rounded-2xl bg-slate-900 border border-amber-500/50 text-left space-y-4 shadow-xl"
-                  >
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                      <h4 className="text-sm font-black text-amber-400 flex items-center gap-2">
-                        <Edit3 className="w-4 h-4" /> Edit Registration Slip Details
-                      </h4>
-                      <button
-                        type="button"
-                        onClick={() => setIsEditingSlip(false)}
-                        className="p-1 text-slate-400 hover:text-white"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <div className="space-y-3 text-xs">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-300 mb-0.5">
-                            Team Name:
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={editSlipForm.teamName}
-                            onChange={(e) =>
-                              setEditSlipForm({ ...editSlipForm, teamName: e.target.value })
-                            }
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-bold"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-300 mb-0.5">
-                            Payment UTR Ref:
-                          </label>
-                          <input
-                            type="text"
-                            readOnly
-                            value={editSlipForm.paymentUtr || ''}
-                            aria-readonly="true"
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-cyan-300 font-mono cursor-not-allowed"
-                          />
-                        </div>
-
-                        <div className="sm:col-span-2">
-                          <label className="block text-[10px] font-bold text-slate-300 mb-0.5">
-                            Domain:
-                          </label>
-                          <div className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-sm">
-                            {editSlipForm.domain || editSlipForm.preferredTrack}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Edit Members */}
-                      <div className="pt-2 border-t border-slate-800 space-y-2">
-                        <label className="block text-[10px] font-bold text-slate-300 uppercase">
-                          Team Members List (6 Participants):
-                        </label>
-                        {editSlipForm.members.map((mem: any, idx: number) => (
-                          <div
-                            key={idx}
-                            className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5"
-                          >
-                            <span className="text-[10px] font-bold text-cyan-400">
-                              {idx === 0 ? 'Leader / Member 1' : `Member #${idx + 1}`}
-                            </span>
-                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-1.5">
-                              <input
-                                type="text"
-                                placeholder="Full Name"
-                                value={mem.fullName}
-                                onChange={(e) => {
-                                  const updated = [...editSlipForm.members];
-                                  updated[idx].fullName = e.target.value;
-                                  setEditSlipForm({ ...editSlipForm, members: updated });
-                                }}
-                                className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
-                              />
-                              <input
-                                type="text"
-                                placeholder="USN"
-                                value={mem.usn}
-                                onChange={(e) => {
-                                  const updated = [...editSlipForm.members];
-                                  updated[idx].usn = e.target.value;
-                                  setEditSlipForm({ ...editSlipForm, members: updated });
-                                }}
-                                className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-xs"
-                              />
-                              <input
-                                type="email"
-                                placeholder="Email"
-                                value={mem.email}
-                                onChange={(e) => {
-                                  const updated = [...editSlipForm.members];
-                                  updated[idx].email = e.target.value;
-                                  setEditSlipForm({ ...editSlipForm, members: updated });
-                                }}
-                                className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-                      <button
-                        type="button"
-                        onClick={() => setIsEditingSlip(false)}
-                        className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={loading}
-                        className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-600/30"
-                      >
-                        <Save className="w-3.5 h-3.5" />
-                        <span>{loading ? 'Saving...' : 'Save & Update Slip'}</span>
-                      </button>
-                    </div>
-                  </form>
-                )}
-
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <button
-                    onClick={handlePrintSlip}
-                    className="flex-1 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow"
-                    id="reg-download-slip-btn"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Download / Print Registration Slip</span>
-                  </button>
-
+                <div className="flex justify-center">
                   <button
                     onClick={onClose}
                     className="py-3 px-6 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs"
@@ -2196,98 +1555,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
         </div>
       )}
 
-      {/* DISPATCHED EMAIL PREVIEW MODAL */}
-      {showEmailPreviewModal && registeredTeam && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
-          <div className="bg-slate-900 border border-cyan-500/80 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-[0_0_50px_rgba(6,182,212,0.4)] text-left relative max-h-[90vh] overflow-y-auto">
-            <button
-              onClick={() => setShowEmailPreviewModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg bg-slate-800"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500 flex items-center justify-center text-cyan-400 shrink-0">
-                <Mail className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-white">Dispatched Email Confirmation</h3>
-                <div className="text-[11px] text-slate-400">
-                  Recipient:{' '}
-                  <strong className="text-cyan-300 font-mono">
-                    {registeredTeam.leaderEmail}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3 text-xs text-slate-300 font-mono">
-              <div className="text-slate-400 text-[11px] border-b border-slate-800 pb-2">
-                <strong>Subject:</strong> [CONFIRMED] Anvation 2026 Registration — Team{' '}
-                {registeredTeam.id}
-              </div>
-
-              <div className="space-y-2 text-slate-200">
-                <p>
-                  Dear <strong>{registeredTeam.members[0]?.fullName || 'Participant'}</strong>,
-                </p>
-                <p>
-                  Congratulations! Your team <strong>"{registeredTeam.teamName}"</strong> has been
-                  successfully registered for <strong>Anvation 2026</strong> at K.S. School of
-                  Engineering and Management (KSSEM), Bengaluru!
-                </p>
-
-                <div className="p-3 rounded-lg bg-indigo-950/60 border border-indigo-500/40 text-indigo-200 space-y-1 my-2">
-                  <div className="text-cyan-300 font-bold">⚡ AUTO-ASSIGNED CREDENTIALS:</div>
-                  <div>
-                    Team ID:{' '}
-                    <strong className="text-white font-bold">{registeredTeam.id}</strong>
-                  </div>
-                  <div>
-                    Portal Password:{' '}
-                    <strong className="text-purple-300 bg-purple-900/80 px-1.5 py-0.5 rounded">
-                      {registeredTeam.accessPassword || 'Unavailable - request an admin reset'}
-                    </strong>
-                  </div>
-                  <div>
-                    Domain:{' '}
-                    <strong className="text-cyan-200">
-                      {registeredTeam.domain || registeredTeam.preferredTrack}
-                    </strong>
-                  </div>
-                  <div>
-                    Payment UTR:{' '}
-                    <strong className="text-emerald-300">
-                      {registeredTeam.paymentUtr || paymentUtr}
-                    </strong>
-                  </div>
-                </div>
-
-                <p className="text-[11px] text-slate-400">
-                  Venue: KSSEM Campus, #15, Mallasandra, Off Kanakapura Road, Bengaluru - 560109.
-                  <br />
-                  Dates: March 27-28, 2026 (24-Hour In-Person Hackathon).
-                </p>
-                <p className="text-[11px] text-slate-400">
-                  Please bring your College ID and this confirmation slip at registration desk
-                  check-in.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowEmailPreviewModal(false)}
-                className="px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-lg"
-              >
-                Close Preview
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

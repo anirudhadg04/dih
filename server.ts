@@ -18,7 +18,7 @@ import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 import { HACKATHON_TRACKS } from "./src/data/mockData";
 import { PAYMENT_UPI_ID, ocrContainsTransactionId } from "./src/utils/upiVerification";
-import { ensureProductionSchema, findProductionDuplicate, loadProductionTeams, productionStoreEnabled, saveProductionTeam, updateProductionTeam } from "./src/server/productionStore";
+import { ensureProductionSchema, findProductionDuplicate, loadProductionTeams, productionStoreEnabled, saveProductionTeam, updateProductionTeam, deleteProductionTeam } from "./src/server/productionStore";
 
 const execFileAsync = promisify(execFile);
 
@@ -504,7 +504,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
 
   function sanitizeTeamForClient(team: any) {
     if (!team) return team;
-    const { accessPassword: _accessPassword, ...rest } = team;
+    const { accessPassword: _accessPassword, portalPasswordPlain: _portalPasswordPlain, ...rest } = team;
     return rest;
   }
 
@@ -1474,9 +1474,10 @@ export async function startServer(options: { listen?: boolean } = {}) {
     });
     const from = String(process.env.MAIL_FROM || process.env.SMTP_USER);
     const recipients = team.members.map((m) => m.email);
+    const password = String(team.portalPasswordPlain || team.accessPassword || '');
     const subject = `ANVATION 2026 Registration Approved — Team ${team.id}`;
-    const text = `Hello participants,\n\nYour team ${team.teamName} (${team.id}) has been approved by the admin.\n\nPlease keep checking your Gmail for updates.\n\nTeam details:\n${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}`;
-    const html = `<p>Hello participants,</p><p>Your team <b>${team.teamName}</b> (<b>${team.id}</b>) has been approved by the admin.</p><p>Please keep checking your Gmail for updates.</p><p>${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}</p>`;
+    const text = `Hello participants,\n\nYour team ${team.teamName} (${team.id}) has been approved by the admin.\n\nPayment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.\n\nPortal password: ${password}\n\nUse Team ID ${team.id} and this password to log in to the participant portal.\n\nTeam details:\n${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}`;
+    const html = `<p>Hello participants,</p><p>Your team <b>${team.teamName}</b> (<b>${team.id}</b>) has been approved by the admin.</p><p><b>Payment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.</b></p><p><b>Portal password:</b> ${password}</p><p>Use Team ID <b>${team.id}</b> and this password to log in to the participant portal.</p><p>${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}</p>`;
     await transporter.verify();
     await Promise.all(recipients.map((recipient) => transporter.sendMail({ from, to: recipient, subject, text, html })));
   }
@@ -1905,6 +1906,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
           teamName: sanitizeInputString(teamName),
           leaderEmail: sanitizeInputString(leader.email.trim().toLowerCase()),
           accessPassword: hashPassword(accessPassword),
+          portalPasswordPlain: accessPassword,
           domain: sanitizeInputString(selectedDomain),
           preferredTrack: sanitizeInputString(selectedDomain),
           members: [leaderParticipant, ...formattedMembers],
@@ -3530,8 +3532,8 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       team.approvalStatus = 'APPROVED';
       team.approvalTimestamp = new Date().toISOString();
       team.status = 'Confirmed' as any;
-      team.paymentStatus = 'Verified' as any;
-      team.paymentAmountDetail = `Admin approved after payment audit; paid ${cmsConfig.registrationFee || 0} INR`;
+      team.paymentStatus = 'PAYMENT_APPROVED' as any;
+      team.paymentAmountDetail = `Payment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.`;
       team.approvalEmailStatus = 'PENDING';
 
       if (productionStoreEnabled) {
@@ -3547,11 +3549,6 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         team.approvalEmailStatus = 'FAILED';
         console.error('[EMAIL APPROVAL] Failed for team', team.id, emailErr?.message || emailErr);
       }
-
-      if (productionStoreEnabled) {
-        try { await updateProductionTeam(team); } catch (storageErr) { console.error('[DATABASE] Production approval email state update failed:', storageErr); }
-      }
-      markDirty();
 
       auditLogs.unshift({
         id: `log-${Date.now()}`,
@@ -3618,23 +3615,95 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     }
   });
 
-  app.post("/api/finance/verify-utr", requireAdmin, (req, res) => {
+  app.post("/api/finance/verify-utr", requireAdmin, async (req, res) => {
     const { teamId, paymentStatus } = req.body; // 'Verified' or 'Rejected'
-    const team = teams.find(t => t.id === teamId);
+    const team = teams.find((candidate) => candidate.id.toLowerCase() === String(teamId || '').toLowerCase() || (candidate.regNumber || '').toLowerCase() === String(teamId || '').toLowerCase());
     if (!team) return res.status(404).json({ success: false, error: "Team not found" });
 
-    team.paymentStatus = paymentStatus;
+    if (paymentStatus === 'Rejected') {
+      const teamToRemove = { ...team };
+      const oldSessions = new Map<string, any>();
+
+      for (const [sid, session] of sessionStore.entries()) {
+        if (session.user.type === 'participant' && session.user.teamId === team.id) {
+          oldSessions.set(sid, session);
+          sessionStore.delete(sid);
+        }
+      }
+
+      if (productionStoreEnabled) {
+        try {
+          await deleteProductionTeam(team.id);
+        } catch (storageErr) {
+          console.error('[DATABASE] Production team deletion for rejected payment failed:', storageErr);
+        }
+      }
+
+      teams = teams.filter((candidate) => candidate.id.toLowerCase() !== team.id.toLowerCase() && (candidate.regNumber || '').toLowerCase() !== team.id.toLowerCase());
+      rebuildUniquenessIndexes();
+      markDirty();
+
+      try {
+        fs.writeFileSync(PARTICIPANT_BACKUP_FILE, participantBackupFileContents(teams), { encoding: 'utf8', mode: 0o600 });
+      } catch (backupErr) {
+        console.error('[BACKUP] Failed to rewrite participant registration CSV after payment rejection:', backupErr);
+      }
+
+      auditLogs.unshift({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actorEmail: req.session?.email || req.session?.username || 'unknown-admin',
+        actorRole: (req.session?.role || 'ADMIN') as AdminRole,
+        action: 'Payment Status Change: Rejected + credentials removed',
+        target: `Team ${team.teamName} (${team.id})`,
+        beforeValue: team.paymentStatus || 'Pending',
+        afterValue: 'Rejected + Removed',
+        reason: 'Payment UTR rejected by finance admin. Team and participants removed from active directories.',
+        ipAddress: getClientIp(req)
+      });
+
+      return res.json({ success: true, removed: true, team: teamToRemove, message: 'Rejected payment team removed from active registration, team control and participant directory.' });
+    }
+
+    if (paymentStatus === 'Verified') {
+      team.paymentStatus = 'PAYMENT_APPROVED' as any;
+      team.paymentAmountDetail = `Payment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.`;
+      team.status = 'Confirmed' as any;
+      team.approvalStatus = 'APPROVED';
+      team.approvalTimestamp = new Date().toISOString();
+      team.approvalEmailStatus = 'PENDING';
+
+      try {
+        await sendApprovalEmail(team);
+        team.approvalEmailStatus = 'SENT';
+        team.approvalEmailSentAt = new Date().toISOString();
+      } catch (emailErr: any) {
+        team.approvalEmailStatus = 'FAILED';
+        console.error('[EMAIL APPROVAL] Failed for team', team.id, emailErr?.message || emailErr);
+      }
+    } else {
+      team.paymentStatus = paymentStatus;
+    }
+
+    if (productionStoreEnabled) {
+      try {
+        await updateProductionTeam(team);
+      } catch (storageErr) {
+        console.error('[DATABASE] Production verification update failed:', storageErr);
+      }
+    }
+
     auditLogs.unshift({
       id: `log-${Date.now()}`,
       timestamp: new Date().toISOString(),
-      actorEmail: "superadmin@kssem.edu.in",
-      actorRole: "SUPER_ADMIN",
+      actorEmail: req.session?.email || req.session?.username || 'unknown-admin',
+      actorRole: (req.session?.role || 'ADMIN') as AdminRole,
       action: `Payment Status Change: ${paymentStatus}`,
       target: `Team ${team.teamName} (${team.id})`,
       beforeValue: team.paymentUtr || 'No UTR',
       afterValue: paymentStatus,
       reason: `Finance audit verification by Super Admin`,
-      ipAddress: req.ip || "127.0.0.1"
+      ipAddress: getClientIp(req)
     });
 
     res.json({ success: true, team });
