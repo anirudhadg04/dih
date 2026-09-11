@@ -2,7 +2,7 @@
 REM ============================================================
 REM  ANVATION 2026 - Production start script (Windows)
 REM  Starts the hardened, multi-core server on port 3001
-REM  from the pre-built dist/ folder. Access via http://localhost:3001
+REM  from the pre-built dist/ folder. Access via the configured production URL.
 REM ============================================================
 cd /d "%~dp0"
 if not exist "dist\server.cjs" (

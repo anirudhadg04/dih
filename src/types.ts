@@ -4,9 +4,7 @@ export interface Participant {
   id: string;
   fullName: string;
   college: string;
-  state?: string;
-  /** Legacy field retained for loading older persisted records. */
-  semester?: string;
+  state: string;
   email: string;
   phone: string;
   usn: string;
@@ -26,7 +24,7 @@ export interface Participant {
 
 export interface Team {
   id: string; // Team ID like AN-001 or CODE-1001
-  regNumber: string;
+  regNumber?: string;
   teamName: string;
   leaderEmail: string;
   accessPassword?: string;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { HACKATHON_TRACKS, COLLEGE_INFO } from '../data/mockData';
+import { HACKATHON_TRACKS, COLLEGE_INFO, INDIA_STATES_AND_UTS } from '../data/mockData';
 import { drawQRCode, gateQrDataUrl } from '../utils/qr';
 import { printDocument } from '../utils/pdfGenerator';
 import { Rocket, CheckCircle2, User, Users, Shield, FileText, ArrowRight, Download, Sparkles, Edit3, Save, Plus, Trash2, X, AlertTriangle, Check, CreditCard, RefreshCw, Mail, Eye } from 'lucide-react';
@@ -50,6 +50,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   const [paymentScreenshotData, setPaymentScreenshotData] = useState<string | null>(null);
   const [paymentScreenshotName, setPaymentScreenshotName] = useState<string>('');
   const [duplicateErrorInfo, setDuplicateErrorInfo] = useState<{ isDuplicate: boolean; field?: string; message?: string } | null>(null);
+  const [duplicateFieldErrors, setDuplicateFieldErrors] = useState<Record<string, string>>({});
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const paymentScreenshotInputRef = useRef<HTMLInputElement | null>(null);
@@ -62,37 +64,33 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   // Form State
   const [teamName, setTeamName] = useState('');
   const [domain, setDomain] = useState(HACKATHON_TRACKS[0].title);
-  const [accommodationRequired, setAccommodationRequired] = useState(true);
   const [paymentUtr, setPaymentUtr] = useState('');
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [registrationFee, setRegistrationFee] = useState(250);
 
   // Leader State (Member 1)
   const [leader, setLeader] = useState({
     fullName: '',
-    college: '',
-    department: 'Computer Science & Engineering',
-    semester: '6th Semester',
     email: '',
     phone: '',
     usn: '',
-    gender: 'Male',
-    githubUrl: '',
-    linkedinUrl: '',
-    emergencyContact: ''
+    college: '',
+    state: '',
+    accommodationRequired: false,
   });
 
   // Members State (1 to 3 additional members: Members 2, 3, 4)
   const createDefaultMembers = () => [
-    { fullName: '', email: '', phone: '', usn: '', college: '', gender: 'Male' }
+    { fullName: '', email: '', phone: '', usn: '', college: '', state: '', accommodationRequired: false }
   ];
 
-  const [members, setMembers] = useState<Array<{ fullName: string; email: string; phone: string; usn: string; college: string; gender: string }>>(
+  const [members, setMembers] = useState<Array<{ fullName: string; email: string; phone: string; usn: string; college: string; state: string; accommodationRequired: boolean }>>(
     createDefaultMembers()
   );
 
   const handleAddMember = () => {
     if (members.length < 3) {
-      setMembers([...members, { fullName: '', email: '', phone: '', usn: '', college: '', gender: 'Male' }]);
+      setMembers([...members, { fullName: '', email: '', phone: '', usn: '', college: '', state: '', accommodationRequired: false }]);
     }
   };
 
@@ -115,6 +113,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     setPaymentConfirmed(false);
     setPaymentFailError(null);
     setShowPaymentFailModal(false);
+    setDuplicateFieldErrors({});
+    setCheckingDuplicates(false);
     setRegisteredTeam(null);
     setDispatchedRecipients([]);
     setShowEmailPreviewModal(false);
@@ -124,7 +124,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     setSlipSaveSuccess(false);
     setTeamName('');
     setDomain(HACKATHON_TRACKS[0].title);
-    setAccommodationRequired(true);
     setPaymentUtr('');
     setPaymentScreenshotData(null);
     setPaymentScreenshotName('');
@@ -132,16 +131,12 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
     if (paymentScreenshotInputRef.current) paymentScreenshotInputRef.current.value = '';
     setLeader({
       fullName: '',
-      college: '',
-      department: 'Computer Science & Engineering',
-      semester: '6th Semester',
       email: '',
       phone: '',
       usn: '',
-      gender: 'Male',
-      githubUrl: '',
-      linkedinUrl: '',
-      emergencyContact: ''
+      college: '',
+      state: '',
+      accommodationRequired: false,
     });
     setMembers(createDefaultMembers());
   };
@@ -152,6 +147,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       fetch('/api/registration-status')
         .then(res => res.json())
         .then(data => {
+          setRegistrationFee(Number(data?.registrationFee) || 250);
           if (data && (data.freezeRegistrations || !data.registrationOpen)) {
             setIsFrozen(true);
           } else {
@@ -178,7 +174,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
   if (!isOpen) return null;
 
-  const handleUpdateMember = (index: number, field: string, val: string) => {
+  const handleUpdateMember = (index: number, field: string, val: string | boolean) => {
     const updated = [...members];
     (updated[index] as any)[field] = val;
     setMembers(updated);
@@ -223,17 +219,21 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
   const currentFeePerParticipant = 250;
   const currentParticipantCount = 1 + members.length;
-  const currentTotalFee = currentParticipantCount * currentFeePerParticipant;
+  const currentTotalFee = currentFeePerParticipant * currentParticipantCount;
 
   const isLeaderValid = Boolean(
     leader.fullName.trim() &&
     leader.email.trim() &&
     leader.usn.trim() &&
-    leader.phone.trim()
+    leader.phone.trim() &&
+    leader.college.trim() &&
+    leader.state.trim() &&
+    /^[^\s@]+@gmail\.com$/i.test(leader.email.trim()) &&
+    /^\d{10}$/.test(leader.phone.trim())
   );
 
   const areAllMembersFilled = members.length >= 1 && members.length <= 3 && members.every(m =>
-    Boolean(m.fullName.trim() && m.email.trim() && m.usn.trim() && m.phone.trim())
+    Boolean(m.fullName.trim() && m.email.trim() && m.usn.trim() && m.phone.trim() && m.college.trim() && m.state.trim() && /^[^\s@]+@gmail\.com$/i.test(m.email.trim()) && /^\d{10}$/.test(m.phone.trim()))
   );
 
   // Email and USN uniqueness check
@@ -245,6 +245,56 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
   const hasDuplicatePhone = new Set(allParticipantPhones.map(phone => phone.replace(/[^0-9]/g, ''))).size !== allParticipantPhones.length;
 
   const isStep3Valid = isLeaderValid && areAllMembersFilled && !hasDuplicateEmail && !hasDuplicateUsn && !hasDuplicatePhone;
+
+  const checkRegistrationDuplicates = async (includeParticipants: boolean): Promise<boolean> => {
+    setCheckingDuplicates(true);
+    setDuplicateFieldErrors({});
+    try {
+      const response = await fetch('/api/registration/check-duplicates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teamName,
+          domain,
+          ...(includeParticipants ? { leader, members } : {})
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || `Duplicate check failed with HTTP ${response.status}.`);
+      }
+      const conflicts = Array.isArray(data.conflicts) ? data.conflicts : [];
+      if (conflicts.length > 0) {
+        setDuplicateFieldErrors(conflicts.reduce((errors: Record<string, string>, conflict: { field?: string; message?: string }) => {
+          if (conflict.field) errors[conflict.field] = conflict.message || 'This value is already registered.';
+          return errors;
+        }, {}));
+        return false;
+      }
+      return true;
+    } catch (error) {
+      setDuplicateFieldErrors({
+        form: error instanceof Error
+          ? error.message
+          : 'Could not check existing registrations. Please retry before continuing.'
+      });
+      return false;
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  };
+
+  const handleStep1Next = async () => {
+    if (teamName.trim() && await checkRegistrationDuplicates(false)) setStep(2);
+  };
+
+  const handleStep3Next = async () => {
+    if (!isStep3Valid) {
+      setDuplicateFieldErrors({ form: 'Complete every required participant field with a valid Gmail address and exactly 10-digit phone number before continuing.' });
+      return;
+    }
+    if (await checkRegistrationDuplicates(true)) setStep(4);
+  };
 
   const handleSubmitRegistration = async (confirmedUtr?: string) => {
     // Double-submission lock: prevents rapid double-clicks or the 500ms
@@ -297,11 +347,25 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
           teamName: teamName || 'Anvation Innovators',
           domain,
           preferredTrack: domain,
-          accommodationRequired,
-          leader,
-          members,
+          leader: {
+            fullName: leader.fullName,
+            email: leader.email,
+            phone: leader.phone,
+            usn: leader.usn,
+            college: leader.college,
+            state: leader.state,
+            accommodationRequired: leader.accommodationRequired
+          },
+          members: members.map((member) => ({
+            fullName: member.fullName,
+            email: member.email,
+            phone: member.phone,
+            usn: member.usn,
+            college: member.college,
+            state: member.state,
+            accommodationRequired: member.accommodationRequired
+          })),
           paymentUtr: finalUtr,
-          paymentAmount: totalFee,
           paymentScreenshot: paymentScreenshotData || null
         })
       });
@@ -315,7 +379,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         // Gather all participant emails
         const allEmails = [
           leader.email,
-          ...members.map(m => m.email).filter(Boolean)
+          ...members.map((m: { email: string }) => m.email).filter(Boolean)
         ];
         setDispatchedRecipients(data.emailRecipients || allEmails);
 
@@ -329,12 +393,11 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               teamId: data.team.id,
               emails: allEmails,
               teamName: data.team.teamName,
-              track: data.team.preferredTrack,
+              domain: data.team.domain || data.team.preferredTrack,
               password: data.accessPassword,
-              regNumber: data.team.regNumber,
               participants: [
                 { email: leader.email, name: leader.fullName, college: leader.college, role: 'Leader' },
-                ...members.map(m => ({ email: m.email, name: m.fullName, college: m.college, role: 'Member' }))
+                ...members.map((m: { email: string; fullName: string; college: string }) => ({ email: m.email, name: m.fullName, college: m.college, role: 'Member' }))
               ].filter(p => p.email)
             })
           });
@@ -434,7 +497,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           utr: utrToVerify,
-          amount: String(totalFee),
+          participantCount: currentParticipantCount,
           paymentScreenshot: paymentScreenshotData
         })
       });
@@ -459,6 +522,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         setPaymentFailError(data.error || "Payment verification failed: Transaction reference not found on UPI settlement network.");
         setShowPaymentFailModal(true);
         setPaymentVerifiedSuccess(false);
+        setPaymentConfirmed(false);
         setPaymentVerifying(false);
         verifyingRef.current = false;
       }
@@ -471,6 +535,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
           : `Payment verification failed: ${message}`
       );
       setShowPaymentFailModal(true);
+      setPaymentVerifiedSuccess(false);
+      setPaymentConfirmed(false);
       setPaymentVerifying(false);
       verifyingRef.current = false;
     }
@@ -552,11 +618,10 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
       </div>
 
       <table>
-        <tr><th>Registration No</th><td>${registeredTeam.regNumber}</td></tr>
         <tr><th>Auto-Assigned Team ID</th><td><strong style="color: #0284c7; font-family: monospace;">${registeredTeam.id}</strong></td></tr>
         <tr><th>Portal Access Password</th><td><strong style="color: #7e22ce; font-family: monospace;">${registeredTeam.accessPassword || 'Unavailable - request an admin reset'}</strong></td></tr>
         <tr><th>Team Name</th><td><strong>${registeredTeam.teamName}</strong></td></tr>
-        <tr><th>Preferred Track</th><td>${registeredTeam.preferredTrack}</td></tr>
+        <tr><th>Domain</th><td>${registeredTeam.domain || registeredTeam.preferredTrack}</td></tr>
         <tr><th>Payment UTR Ref</th><td>${registeredTeam.paymentUtr || 'Verified (PhonePe)'}</td></tr>
         <tr><th>Registration Fee</th><td>₹${totalFee} (₹${currentFeePerParticipant} × ${participantCount} participants)</td></tr>
         <tr><th>Member 1 (Leader)</th><td>${registeredTeam.members[0]?.fullName} (${registeredTeam.members[0]?.email})</td></tr>
@@ -645,7 +710,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
             {/* Step Indicator */}
             {step < 5 && (
               <div className="flex items-center justify-between text-[11px] text-slate-400 px-2 flex-wrap gap-y-1">
-                <span className={`font-bold ${step >= 1 ? 'text-cyan-400' : ''}`}>1. Track</span>
+                <span className={`font-bold ${step >= 1 ? 'text-cyan-400' : ''}`}>1. Domain</span>
                 <span>→</span>
                 <span className={`font-bold ${step >= 2 ? 'text-cyan-400' : ''}`}>2. Team Leader</span>
                 <span>→</span>
@@ -669,6 +734,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm focus:border-cyan-500 focus:outline-none"
                 id="reg-team-name-input"
               />
+              {duplicateFieldErrors.teamName && <p className="mt-1 text-xs text-red-400">{duplicateFieldErrors.teamName}</p>}
             </div>
 
             <div>
@@ -686,19 +752,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">Accommodation Required on Campus?</label>
-              <select
-                value={accommodationRequired ? 'yes' : 'no'}
-                onChange={(e) => setAccommodationRequired(e.target.value === 'yes')}
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm focus:border-cyan-500 focus:outline-none"
-                id="reg-accommodation-select"
-              >
-                <option value="yes">Yes (Free Hostel Stay & Meals Provided)</option>
-                <option value="no">No (Local Day Scholar)</option>
-              </select>
-            </div>
-
             <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-200 space-y-1">
               <div className="font-bold text-white flex items-center gap-1.5">
                 <Shield className="w-3.5 h-3.5 text-cyan-400" />
@@ -710,8 +763,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
             </div>
 
             <button
-              disabled={!teamName.trim()}
-              onClick={() => setStep(2)}
+              disabled={!teamName.trim() || checkingDuplicates}
+              onClick={handleStep1Next}
               className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-sm shadow-lg hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50 flex items-center justify-center gap-2"
               id="reg-step1-next-btn"
             >
@@ -742,6 +795,35 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 />
               </div>
 
+              
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">State / Union Territory *</label>
+                <select
+                  required
+                  value={leader.state}
+                  onChange={(e) => setLeader({ ...leader, state: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                >
+                  <option value="">Select State </option>
+                  {INDIA_STATES_AND_UTS.map((state) => <option key={state} value={state}>{state}</option>)}
+                </select>
+              </div>
+               <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Email Address *</label>
+                <input
+                  type="email"
+                  required
+                  value={leader.email}
+                  onChange={(e) => setLeader({ ...leader, email: e.target.value })}
+                  placeholder="akash@gmail.com"
+                  pattern="[^\s@]+@gmail\.com"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                  id="reg-leader-email-input"
+                />
+                {duplicateFieldErrors['leader.email'] && <p className="mt-1 text-xs text-red-400">{duplicateFieldErrors['leader.email']}</p>}
+              </div>
+              
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">USN / Roll Number *</label>
                 <input
@@ -753,18 +835,19 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
                   id="reg-leader-usn-input"
                 />
+                {duplicateFieldErrors['leader.usn'] && <p className="mt-1 text-xs text-red-400">{duplicateFieldErrors['leader.usn']}</p>}
               </div>
 
+             
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Email Address *</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1">College Name *</label>
                 <input
-                  type="email"
+                  type="text"
                   required
-                  value={leader.email}
-                  onChange={(e) => setLeader({ ...leader, email: e.target.value })}
-                  placeholder="akash@gmail.com"
+                  value={leader.college}
+                  onChange={(e) => setLeader({ ...leader, college: e.target.value })}
+                  placeholder="College / Institute"
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
-                  id="reg-leader-email-input"
                 />
               </div>
 
@@ -775,49 +858,27 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                   required
                   value={leader.phone}
                   onChange={(e) => setLeader({ ...leader, phone: e.target.value })}
-                  placeholder="+91 9876543210"
+                  placeholder="9876543210"
+                  maxLength={10}
+                  pattern="[0-9]{10}"
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
                   id="reg-leader-phone-input"
                 />
+                {duplicateFieldErrors['leader.phone'] && <p className="mt-1 text-xs text-red-400">{duplicateFieldErrors['leader.phone']}</p>}
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Gender</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Accommodation required</label>
                 <select
-                  value={leader.gender}
-                  onChange={(e) => setLeader({ ...leader, gender: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-cyan-500 focus:outline-none"
-                  id="reg-leader-gender-select"
+                  value={leader.accommodationRequired ? 'yes' : 'no'}
+                  onChange={(e) => setLeader({ ...leader, accommodationRequired: e.target.value === 'yes' })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
                 >
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
+                  <option value="no">No</option>
+                  <option value="yes">Yes</option>
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Department & Semester:</label>
-                <input
-                  type="text"
-                  required
-                  value={leader.department}
-                  onChange={(e) => setLeader({ ...leader, department: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
-                  id="reg-leader-dept-input"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-slate-300 mb-1">College Name:</label>
-                <input
-                  type="text"
-                  value={leader.college}
-                  onChange={(e) => setLeader({ ...leader, college: e.target.value })}
-                  placeholder="College / Institute Name"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
-                  id="reg-leader-college-input"
-                />
-              </div>
             </div>
 
             <div className="flex gap-2">
@@ -863,6 +924,11 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
             </div>
 
             {/* Validation warnings for duplicates or missing fields */}
+            {duplicateFieldErrors.form && (
+              <div className="p-2.5 rounded-xl bg-red-950/40 border border-red-500/50 text-red-300 text-xs">
+                {duplicateFieldErrors.form}
+              </div>
+            )}
             {hasDuplicateEmail && (
               <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -910,6 +976,29 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                       />
                     </div>
                     <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">College Name *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="College / Institute"
+                        value={mem.college}
+                        onChange={(e) => handleUpdateMember(idx, 'college', e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">State / Union Territory *</label>
+                      <select
+                        required
+                        value={mem.state}
+                        onChange={(e) => handleUpdateMember(idx, 'state', e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                      >
+                        <option value="">Select state </option>
+                        {INDIA_STATES_AND_UTS.map((state) => <option key={state} value={state}>{state}</option>)}
+                      </select>
+                    </div>
+                    <div>
                       <label className="block text-[10px] font-bold text-slate-400 mb-0.5">USN / Roll Number *</label>
                       <input
                         type="text"
@@ -919,18 +1008,23 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                         onChange={(e) => handleUpdateMember(idx, 'usn', e.target.value)}
                         className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
                       />
+                      {duplicateFieldErrors[`members.${idx}.usn`] && <p className="mt-1 text-[10px] text-red-400">{duplicateFieldErrors[`members.${idx}.usn`]}</p>}
                     </div>
+
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Email Address *</label>
                       <input
                         type="email"
-                        placeholder="Email Address"
                         required
                         value={mem.email}
                         onChange={(e) => handleUpdateMember(idx, 'email', e.target.value)}
+                        placeholder="name@gmail.com"
+                        pattern="[^\s@]+@gmail\.com"
                         className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
                       />
+                      {duplicateFieldErrors[`members.${idx}.email`] && <p className="mt-1 text-[10px] text-red-400">{duplicateFieldErrors[`members.${idx}.email`]}</p>}
                     </div>
+                    
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Phone Number *</label>
                       <input
@@ -938,31 +1032,23 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                         required
                         value={mem.phone}
                         onChange={(e) => handleUpdateMember(idx, 'phone', e.target.value)}
-                        placeholder="+91 9876543210"
+                        placeholder="9876543210"
+                        maxLength={10}
+                        pattern="[0-9]{10}"
                         className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
                       />
+                      {duplicateFieldErrors[`members.${idx}.phone`] && <p className="mt-1 text-[10px] text-red-400">{duplicateFieldErrors[`members.${idx}.phone`]}</p>}
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Gender</label>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">Accommodation required</label>
                       <select
-                        value={mem.gender}
-                        onChange={(e) => handleUpdateMember(idx, 'gender', e.target.value)}
+                        value={mem.accommodationRequired ? 'yes' : 'no'}
+                        onChange={(e) => handleUpdateMember(idx, 'accommodationRequired', e.target.value === 'yes')}
                         className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
                       >
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
+                        <option value="no">No</option>
+                        <option value="yes">Yes</option>
                       </select>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-slate-400 mb-0.5">College / Institute Name</label>
-                      <input
-                        type="text"
-                        placeholder="College Name"
-                        value={mem.college}
-                        onChange={(e) => handleUpdateMember(idx, 'college', e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
-                      />
                     </div>
                   </div>
                 </div>
@@ -973,11 +1059,11 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
             <div className="p-3 rounded-xl bg-slate-900 border border-emerald-500/30 flex items-center justify-between">
               <div className="text-xs text-slate-300 font-semibold">
                 Registration Fee ({currentParticipantCount} Participants)
-                <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">₹{currentFeePerParticipant} / participant</div>
+                <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">One payment per team</div>
               </div>
               <div className="text-right">
                 <div className="text-emerald-400 font-black text-xl">₹{currentTotalFee}</div>
-                <div className="text-[10px] text-slate-400">₹{currentFeePerParticipant} × {currentParticipantCount} participants</div>
+                <div className="text-[10px] text-slate-400">Covers the complete team</div>
               </div>
             </div>
 
@@ -986,8 +1072,9 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 Back
               </button>
               <button
-                disabled={!isStep3Valid}
-                onClick={() => setStep(4)}
+                type="button"
+                disabled={checkingDuplicates}
+                onClick={handleStep3Next}
                 className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-xs shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
                 id="reg-step3-next-btn"
               >
@@ -1001,6 +1088,22 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
         {/* STEP 4 - PHONEPE QR PAYMENT STEP */}
         {step === 4 && (
           <div className="space-y-4 animate-fadeIn">
+            <div className="p-4 rounded-2xl bg-slate-900 border border-cyan-500/40 text-left space-y-3">
+              <h4 className="font-bold text-white text-sm">Complete Team Registration Summary</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-300">
+                <div><strong className="text-slate-400">Team Name:</strong> {teamName}</div>
+                <div><strong className="text-slate-400">Domain:</strong> {domain}</div>
+              </div>
+              <div className="space-y-2">
+                {[{ ...leader, role: 'Leader' }, ...members.map((member) => ({ ...member, role: 'Member' }))].map((participant, index) => (
+                  <div key={`${participant.role}-${index}`} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300">
+                    <div className="font-bold text-cyan-300">Participant {index + 1} ({participant.role})</div>
+                    <div>{participant.fullName} · {participant.usn} · {participant.email} · {participant.phone}</div>
+                    <div>{participant.college} · {participant.state} · Accommodation: {participant.accommodationRequired ? 'Yes' : 'No'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-indigo-400" />
@@ -1117,16 +1220,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 </div>
 
                 <div className="flex flex-col gap-2 pt-1">
-                  <button
-                    type="button"
-                    disabled={paymentVerifying || paymentConfirmed}
-                    onClick={() => handleVerifyPayment()}
-                    className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-                    id="verify-pay-btn"
-                  >
-                    <Check className="w-4 h-4 text-emerald-400" />
-                    <span>{paymentConfirmed ? "Payment Verified ✓" : "Verify UTR & Continue"}</span>
-                  </button>
+                  
                 </div>
               </div>
             </div>
@@ -1273,8 +1367,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                       <span>Edit Slip Details</span>
                     </button>
                     <div className="text-right">
-                      <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider font-mono">REG NO</span>
-                      <span className="text-sm font-bold text-amber-400 font-mono">{registeredTeam.regNumber}</span>
                     </div>
                   </div>
                 </div>
@@ -1311,8 +1403,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-300">
                   <div><strong className="text-slate-400">Team Name:</strong> <span className="text-white font-bold">{registeredTeam.teamName}</span></div>
-                  <div><strong className="text-slate-400">Track:</strong> <span className="text-purple-300 font-bold">{registeredTeam.preferredTrack}</span></div>
-                  <div><strong className="text-slate-400">Leader:</strong> <span className="text-white">{registeredTeam.members[0]?.fullName}</span> ({registeredTeam.members[0]?.gender || 'Male'} • {registeredTeam.members[0]?.usn})</div>
+                  <div><strong className="text-slate-400">Domain:</strong> <span className="text-purple-300 font-bold">{registeredTeam.domain || registeredTeam.preferredTrack}</span></div>
+                  <div><strong className="text-slate-400">Leader:</strong> <span className="text-white">{registeredTeam.members[0]?.fullName}</span> ({registeredTeam.members[0]?.usn})</div>
                   <div><strong className="text-slate-400">Payment UTR:</strong> <span className="text-emerald-400 font-mono font-bold">{registeredTeam.paymentUtr || paymentUtr}</span></div>
                   <div className="col-span-1 sm:col-span-2"><strong className="text-slate-400">College:</strong> {registeredTeam.members[0]?.college}</div>
                   <div className="col-span-1 sm:col-span-2 pt-1 border-t border-slate-800/80">
@@ -1321,11 +1413,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                       {registeredTeam.members.map((m: any, i: number) => (
                         <div key={i} className="flex flex-wrap justify-between items-center gap-x-4 gap-y-0.5 text-[11px] bg-slate-950/60 px-2.5 py-1.5 rounded-lg border border-slate-800">
                           <span>{i === 0 ? '👑 Leader' : `Member ${i+1}`}: <strong className="text-white">{m.fullName}</strong> ({m.usn})</span>
-                          <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
-                            String(m.gender).toLowerCase() === 'female'
-                              ? 'bg-pink-950/80 text-pink-300 border border-pink-700'
-                              : 'bg-cyan-950/80 text-cyan-300 border border-cyan-700'
-                          }`}>{m.gender || 'Male'}</span>
                           <span className="text-slate-400 font-mono">{m.email}</span>
                           <span className="text-slate-500 w-full sm:w-auto">🏫 {m.college || 'Not specified'}</span>
                         </div>
@@ -1396,9 +1483,9 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-slate-300 mb-0.5">Preferred Track:</label>
+                      <label className="block text-[10px] font-bold text-slate-300 mb-0.5">Domain:</label>
                       <div className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-sm">
-                        {editSlipForm.preferredTrack}
+                        {editSlipForm.domain || editSlipForm.preferredTrack}
                       </div>
                     </div>
                   </div>
@@ -1445,19 +1532,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                             }}
                             className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
                           />
-                          <select
-                            value={mem.gender || 'Male'}
-                            onChange={(e) => {
-                              const updated = [...editSlipForm.members];
-                              updated[idx].gender = e.target.value;
-                              setEditSlipForm({ ...editSlipForm, members: updated });
-                            }}
-                            className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
-                          >
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                            <option value="Other">Other</option>
-                          </select>
                         </div>
                       </div>
                     ))}
@@ -1647,9 +1721,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ isOpen, on
                 <div className="p-3 rounded-lg bg-indigo-950/60 border border-indigo-500/40 text-indigo-200 space-y-1 my-2">
                   <div className="text-cyan-300 font-bold">⚡ AUTO-ASSIGNED CREDENTIALS:</div>
                   <div>Team ID: <strong className="text-white font-bold">{registeredTeam.id}</strong></div>
-                  <div>Registration No: <strong className="text-amber-300">{registeredTeam.regNumber}</strong></div>
                   <div>Portal Password: <strong className="text-purple-300 bg-purple-900/80 px-1.5 py-0.5 rounded">{registeredTeam.accessPassword || 'Unavailable - request an admin reset'}</strong></div>
-                  <div>Chosen Track: <strong className="text-cyan-200">{registeredTeam.preferredTrack}</strong></div>
+                  <div>Domain: <strong className="text-cyan-200">{registeredTeam.domain || registeredTeam.preferredTrack}</strong></div>
                   <div>Payment UTR: <strong className="text-emerald-300">{registeredTeam.paymentUtr || paymentUtr}</strong></div>
                 </div>
 

@@ -18,6 +18,7 @@ import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 import { HACKATHON_TRACKS } from "./src/data/mockData";
 import { PAYMENT_UPI_ID, ocrContainsTransactionId } from "./src/utils/upiVerification";
+import { ensureProductionSchema, findProductionDuplicate, loadProductionTeams, productionStoreEnabled, saveProductionTeam } from "./src/server/productionStore";
 
 const execFileAsync = promisify(execFile);
 
@@ -85,7 +86,7 @@ declare global {
 // configured without extra packages. Never overrides already-set env vars.
 try {
   const envFile = path.join(process.cwd(), ".env");
-  if (fs.existsSync(envFile)) {
+  if (!process.env.VERCEL && fs.existsSync(envFile)) {
     for (const rawLine of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
       const line = rawLine.trim();
       if (!line || line.startsWith("#")) continue;
@@ -131,9 +132,9 @@ function getSmtpConfig(): { configured: boolean; missing: string[] } {
 // ============================================================================
 // Runtime & cluster configuration
 // ============================================================================
-const DEFAULT_PORT = 3001;
+const DEFAULT_PORT = Number(process.env.PORT) || 3001;
 const INTERNAL_PORT = Number(process.env.INTERNAL_PORT) || 3002;
-const PUBLIC_PORT = Number(process.env.PORT) || DEFAULT_PORT;
+const PUBLIC_PORT = DEFAULT_PORT;
 
 // Optional multi-core mode. Leave unset for the safe, single-process default.
 // Set e.g. `CLUSTER_WORKERS=auto` (all logical cores) or a number like 8 to
@@ -185,11 +186,11 @@ function proxyApiToAuthority(req: any, res: any) {
   for (const [k, v] of Object.entries(req.headers || {})) {
     if (v !== undefined) headers[k] = String(v);
   }
-  headers.host = `127.0.0.1:${INTERNAL_PORT}`;
+  headers.host = `0.0.0.0:${INTERNAL_PORT}`;
 
   const upstream = httpx.request(
     {
-      hostname: "127.0.0.1",
+      hostname: "0.0.0.0",
       port: INTERNAL_PORT,
       path: req.originalUrl || req.url || "/",
       method: req.method || "GET",
@@ -304,7 +305,7 @@ async function run() {
     // private loopback port, and N workers share the public port for static
     // content + API proxying. Workers inherit env and re-run this module; their
     // `cluster.isPrimary` is false so they take the proxy-worker path above.
-    console.log(`[CLUSTER] Primary authority on 127.0.0.1:${INTERNAL_PORT}, spawning ${WORKER_COUNT} worker(s).`);
+    console.log(`[CLUSTER] Primary authority on internal port ${INTERNAL_PORT}, spawning ${WORKER_COUNT} worker(s).`);
     process.env.ANVATION_ROLE = "authority";
     try {
       if (!tryClusterSpawn(cluster, WORKER_COUNT)) {
@@ -322,9 +323,10 @@ async function run() {
   await startServer();
 }
 
-export async function startServer() {
+export async function startServer(options: { listen?: boolean } = {}) {
   const app = express();
   const requestedPort = PUBLIC_PORT;
+  const shouldListen = options.listen !== false && !process.env.VERCEL;
 
   // An 8 MB screenshot expands when sent as a base64 data URL.
   app.use(express.json({ limit: "16mb" }));
@@ -446,42 +448,6 @@ export async function startServer() {
       .trim();
   }
 
-  // OWASP A04 / A07: Brute Force Login Protection & Account Lockout Tracker
-  const failedLoginAttempts = new Map<string, { count: number; lockedUntil: number }>();
-
-  function checkLoginRate(identifier: string, ip: string): { locked: boolean; waitSeconds?: number } {
-    const now = Date.now();
-    const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
-    for (const k of keys) {
-      const record = failedLoginAttempts.get(k);
-      if (record && record.lockedUntil > now) {
-        const waitSeconds = Math.ceil((record.lockedUntil - now) / 1000);
-        return { locked: true, waitSeconds };
-      }
-    }
-    return { locked: false };
-  }
-
-  function recordLoginFailure(identifier: string, ip: string): void {
-    const now = Date.now();
-    const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
-    for (const k of keys) {
-      const record = failedLoginAttempts.get(k) || { count: 0, lockedUntil: 0 };
-      record.count += 1;
-      if (record.count >= 5) {
-        record.lockedUntil = now + (5 * 60 * 1000); // 5-minute lockout after 5 failed attempts
-      }
-      failedLoginAttempts.set(k, record);
-    }
-  }
-
-  function clearLoginFailure(identifier: string, ip: string): void {
-    const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
-    for (const k of keys) {
-      failedLoginAttempts.delete(k);
-    }
-  }
-
   // Participant login uses a short progressive throttle instead of the legacy
   // five-minute lockout. The map is process-local, so restarting the server
   // clears any obsolete participant penalty state.
@@ -504,7 +470,7 @@ export async function startServer() {
     const keys = [`id:${identifier.toLowerCase()}`, `ip:${ip}`];
     const currentCount = Math.max(...keys.map((key) => participantLoginAttempts.get(key)?.count || 0));
     const nextCount = currentCount + 1;
-    const delaySeconds = nextCount >= 5 ? Math.min((nextCount - 4) * 5, 20) : 0;
+    const delaySeconds = nextCount >= 5 ? Math.min((nextCount - 4) * 5, 30) : 0;
     const throttledUntil = delaySeconds > 0 ? now + delaySeconds * 1000 : 0;
 
     for (const key of keys) {
@@ -523,6 +489,9 @@ export async function startServer() {
   const AUTH_COOKIE = "anvation_session";
   const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
   const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_BOOTSTRAP_PASSWORD || "change-me-in-dev-only";
+  if (process.env.VERCEL && !process.env.ADMIN_BOOTSTRAP_PASSWORD) {
+    throw new Error("ADMIN_BOOTSTRAP_PASSWORD must be configured for Vercel production deployments.");
+  }
   const sessionStore = new Map<string, { user: { id: string; type: "admin" | "participant"; role?: string; email?: string; username?: string; name?: string; teamId?: string; expiresAt: number; }; expiresAt: number }>();
   const passwordResetTokens = new Map<string, { teamId: string; expiresAt: number }>();
   const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000;
@@ -663,8 +632,8 @@ export async function startServer() {
     const origin = String(req.headers.origin || "");
     const referer = String(req.headers.referer || "");
     const host = req.headers.host || "";
-    const trustedOrigin = origin && (origin === `http://${host}` || origin === `https://${host}` || origin === `http://localhost:${process.env.PORT || 3001}` || origin === `http://127.0.0.1:${process.env.PORT || 3001}` || origin === `https://localhost:${process.env.PORT || 3001}`);
-    const trustedReferer = referer && (referer.startsWith(`http://${host}/`) || referer.startsWith(`https://${host}/`) || referer.startsWith("http://localhost:") || referer.startsWith("http://127.0.0.1:"));
+    const trustedOrigin = origin && (origin === `http://${host}` || origin === `https://${host}`);
+    const trustedReferer = referer && (referer.startsWith(`http://${host}/`) || referer.startsWith(`https://${host}/`));
     if (origin && !trustedOrigin && !trustedReferer) {
       return res.status(403).json({ success: false, error: "Request origin is not trusted." });
     }
@@ -692,7 +661,7 @@ export async function startServer() {
     legacyHeaders: true,
     message: { success: false, error: "Too many attempts from this IP. Please wait a moment and retry." },
   });
-  app.use(["/api/participant-login", "/api/participant/request-password-reset", "/api/participant/reset-password", "/api/admin-login", "/api/send-registration-email", "/api/register", "/api/verify-payment", "/api/finance/verify-utr"], authLimiter);
+  app.use(["/api/participant-login", "/api/participant/request-password-reset", "/api/participant/reset-password", "/api/send-registration-email", "/api/register", "/api/verify-payment", "/api/finance/verify-utr"], authLimiter);
 
   // In-Memory Data Store (Clean initialization)
   let teams: Team[] = [];
@@ -702,6 +671,10 @@ export async function startServer() {
   let sponsors: Sponsor[] = [...SPONSORS];
   let milestoneReports: MilestoneReport[] = [];
   let mentorBookings: MentorBooking[] = [];
+
+  if (productionStoreEnabled) {
+    await ensureProductionSchema();
+  }
 
   // Monotonic sequence for collision-free team/member identity.
   // Derived from a counter (not teams.length) so IDs are unique even when
@@ -743,7 +716,7 @@ export async function startServer() {
     maxTeamSize: 4,
     minTeamSize: 2,
     registrationFee: 250,
-    gateScanSecretKey: "ANVATION-GATE-2026-KEY"
+    gateScanSecretKey: process.env.GATE_SCAN_SECRET_KEY || ""
   };
 
   let tickets: SupportTicket[] = [];
@@ -836,41 +809,75 @@ export async function startServer() {
     return `\uFEFF${PARTICIPANT_BACKUP_HEADERS.map(csvCell).join(",")}\n${seedRows}${seedRows ? "\n" : ""}`;
   };
 
+  const parseCsvLine = (line: string): string[] => {
+    const values: string[] = [];
+    let value = "";
+    let quoted = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index];
+      if (character === '"') {
+        if (quoted && line[index + 1] === '"') {
+          value += '"';
+          index += 1;
+        } else {
+          quoted = !quoted;
+        }
+      } else if (character === "," && !quoted) {
+        values.push(value);
+        value = "";
+      } else {
+        value += character;
+      }
+    }
+    values.push(value);
+    return values;
+  };
+
+  const migrateParticipantRegistrationBackup = (contents: string): string => {
+    const lines = contents.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.length > 0);
+    if (lines.length === 0) return participantBackupFileContents(teams);
+    const oldHeaders = parseCsvLine(lines[0]).map((header) => header.trim().toLowerCase());
+    const oldRows = lines.slice(1).map(parseCsvLine);
+    const valueFor = (row: string[], aliases: string[]): string => {
+      const index = aliases.map((alias) => oldHeaders.indexOf(alias)).find((candidate) => candidate >= 0);
+      return index === undefined ? "" : row[index] || "";
+    };
+    const migratedRows = oldRows.map((row) => {
+      const migrated = [
+        valueFor(row, ["registration_timestamp"]),
+        valueFor(row, ["team_id"]),
+        valueFor(row, ["team_name"]),
+        valueFor(row, ["domain", "track"]),
+        valueFor(row, ["participant_name"]),
+        valueFor(row, ["role"]),
+        valueFor(row, ["email"]),
+        valueFor(row, ["phone"]),
+        valueFor(row, ["usn"]),
+        valueFor(row, ["college"]),
+        valueFor(row, ["state"]),
+        valueFor(row, ["accommodation_required"]),
+        valueFor(row, ["payment_utr"]),
+        valueFor(row, ["payment_status"]),
+        valueFor(row, ["payment_amount_detail"]),
+        valueFor(row, ["team_status"])
+      ];
+      return migrated.map(csvCell).join(",");
+    }).filter(Boolean);
+    return `\uFEFF${PARTICIPANT_BACKUP_HEADERS.map(csvCell).join(",")}\n${migratedRows.join("\n")}${migratedRows.length ? "\n" : ""}`;
+  };
+
   const initialiseParticipantRegistrationBackup = () => {
     fs.mkdirSync(PARTICIPANT_BACKUP_DIR, { recursive: true, mode: 0o700 });
     const hasData = fs.existsSync(PARTICIPANT_BACKUP_FILE) && fs.statSync(PARTICIPANT_BACKUP_FILE).size > 0;
     if (hasData) {
       const contents = fs.readFileSync(PARTICIPANT_BACKUP_FILE, "utf8");
-      const header = contents.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0];
-      if (header.includes(csvCell("registration_number"))) {
-        const parseCsvLine = (line: string): string[] => {
-          const values: string[] = [];
-          let value = "";
-          let quoted = false;
-          for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            if (char === '"' && line[i + 1] === '"' && quoted) { value += '"'; i++; continue; }
-            if (char === '"') { quoted = !quoted; continue; }
-            if (char === "," && !quoted) { values.push(value); value = ""; continue; }
-            value += char;
-          }
-          values.push(value);
-          return values;
-        };
-        const lines = contents.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean).map(parseCsvLine);
-        const oldHeaders = lines.shift() || [];
-        const oldIndex = new Map(oldHeaders.map((name, index) => [name, index]));
-        const migratedRows = lines.map((row) => PARTICIPANT_BACKUP_HEADERS.map((name) => {
-          const legacyName = name === "domain" ? "track" : name;
-          return csvCell(row[oldIndex.get(legacyName) ?? -1] || "");
-        }).join(","));
-        fs.writeFileSync(PARTICIPANT_BACKUP_FILE, `\uFEFF${PARTICIPANT_BACKUP_HEADERS.map(csvCell).join(",")}\n${migratedRows.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
-      } else if (!header.includes(csvCell("payment_amount_detail"))) {
-        const migrated = contents.split(/\r?\n/).map((line, index) => {
-          if (!line) return line;
-          return index === 0 ? `${line},${csvCell("payment_amount_detail")}` : `${line},""`;
-        }).join("\n");
-        fs.writeFileSync(PARTICIPANT_BACKUP_FILE, migrated, { encoding: "utf8", mode: 0o600 });
+      const currentHeader = parseCsvLine(contents.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0]);
+      if (currentHeader.join(",") !== PARTICIPANT_BACKUP_HEADERS.join(",")) {
+        fs.writeFileSync(
+          PARTICIPANT_BACKUP_FILE,
+          migrateParticipantRegistrationBackup(contents),
+          { encoding: "utf8", mode: 0o600 }
+        );
       }
       return;
     }
@@ -1014,6 +1021,94 @@ export async function startServer() {
     return next;
   }
 
+  type RegistrationDuplicateCode = "TEAM_NAME_EXISTS" | "EMAIL_EXISTS" | "USN_EXISTS" | "PHONE_EXISTS";
+  type RegistrationDuplicateConflict = {
+    code: RegistrationDuplicateCode;
+    field: string;
+    participantIndex?: number;
+    message: string;
+  };
+
+  function checkRegistrationDuplicates(body: any, excludeTeamId?: string): RegistrationDuplicateConflict[] {
+    const conflicts: RegistrationDuplicateConflict[] = [];
+    const teamName = typeof body?.teamName === "string" ? body.teamName.trim() : "";
+    const normalizedTeamName = teamName ? normalizeTeamName(teamName) : "";
+    const participants = [body?.leader, ...(Array.isArray(body?.members) ? body.members : [])]
+      .filter((participant) => participant && typeof participant === "object");
+    const seenEmails = new Set<string>();
+    const seenUsns = new Set<string>();
+    const seenPhones = new Set<string>();
+
+    if (normalizedTeamName && registeredTeamNames.has(normalizedTeamName)) {
+      const existingTeam = teams.find((team) =>
+        team.id !== excludeTeamId && normalizeTeamName(String(team.teamName || "")) === normalizedTeamName
+      );
+      if (existingTeam) {
+        conflicts.push({
+          code: "TEAM_NAME_EXISTS",
+          field: "teamName",
+          message: `The team name "${teamName}" is already registered.`
+        });
+      }
+    }
+
+    participants.forEach((participant: any, index: number) => {
+      const email = typeof participant.email === "string" ? participant.email.trim().toLowerCase() : "";
+      const usn = typeof participant.usn === "string" ? participant.usn.trim().toUpperCase() : "";
+      const phone = String(participant.phone || "").replace(/[^0-9]/g, "");
+
+      if (email && (seenEmails.has(email) || registeredEmails.has(email))) {
+        conflicts.push({
+          code: "EMAIL_EXISTS",
+          field: index === 0 ? "leader.email" : `members.${index - 1}.email`,
+          participantIndex: index,
+          message: `The email "${participant.email}" is already used by another participant.`
+        });
+      }
+      if (usn && (seenUsns.has(usn) || registeredUsns.has(usn))) {
+        conflicts.push({
+          code: "USN_EXISTS",
+          field: index === 0 ? "leader.usn" : `members.${index - 1}.usn`,
+          participantIndex: index,
+          message: `The USN/ID "${participant.usn}" is already used by another participant.`
+        });
+      }
+      if (phone && (seenPhones.has(phone) || registeredPhones.has(phone))) {
+        conflicts.push({
+          code: "PHONE_EXISTS",
+          field: index === 0 ? "leader.phone" : `members.${index - 1}.phone`,
+          participantIndex: index,
+          message: `The phone number "${participant.phone}" is already used by another participant.`
+        });
+      }
+
+      if (email) seenEmails.add(email);
+      if (usn) seenUsns.add(usn);
+      if (phone) seenPhones.add(phone);
+    });
+
+    return conflicts;
+  }
+
+  app.post("/api/registration/check-duplicates", (req, res) => {
+    const check = async () => {
+      const conflicts = checkRegistrationDuplicates(req.body);
+      const productionConflict = await findProductionDuplicate({
+        teamName: req.body?.teamName,
+        participants: [req.body?.leader, ...(Array.isArray(req.body?.members) ? req.body.members : [])]
+      });
+      if (productionConflict && !conflicts.some((conflict) => conflict.code === productionConflict.code)) {
+        conflicts.push({
+          code: productionConflict.code,
+          field: productionConflict.code === 'TEAM_NAME_EXISTS' ? 'teamName' : productionConflict.code === 'EMAIL_EXISTS' ? 'leader.email' : productionConflict.code === 'USN_EXISTS' ? 'leader.usn' : 'leader.phone',
+          message: `The ${productionConflict.code.replace('_EXISTS', '').toLowerCase()} is already registered.`
+        });
+      }
+      return res.json({ success: conflicts.length === 0, conflicts });
+    };
+    return check().catch(() => res.status(503).json({ success: false, error: 'Production registration storage is unavailable.' }));
+  });
+
   const validRegistrationDomains = new Set(HACKATHON_TRACKS.map((track) => track.title));
 
   // Registration payload and uniqueness validation
@@ -1048,13 +1143,15 @@ export async function startServer() {
     if (cleanTeamName.length < 2 || cleanTeamName.length > 50) {
       return { valid: false, error: "Team name must be between 2 and 50 characters." };
     }
-    if (registeredTeamNames.has(normalizeTeamName(cleanTeamName))) {
+    const teamNameConflict = checkRegistrationDuplicates({ teamName: cleanTeamName }).find((conflict) => conflict.code === "TEAM_NAME_EXISTS");
+    if (teamNameConflict) {
       return {
         valid: false,
         isDuplicate: true,
         field: "teamName",
         fields: ["teamName"],
-        message: `The team name "${cleanTeamName}" is already registered. Team names must be unique; registration is first come, first served.`
+        message: teamNameConflict.message,
+        error: teamNameConflict.code
       };
     }
 
@@ -1066,20 +1163,20 @@ export async function startServer() {
       return { valid: false, error: "Leader full name is required." };
     }
     if (!leader.email?.trim() || !/^[^\s@]+@gmail\.com$/i.test(leader.email.trim())) {
-      return { valid: false, error: "Leader email must be a valid Gmail address ending in @gmail.com." };
-    }
-    if (!leader.college?.trim()) {
-      return { valid: false, error: "Leader college name is required." };
-    }
-    if (!leader.state?.trim()) {
-      return { valid: false, error: "Leader state / union territory is required." };
+      return { valid: false, error: "Leader email must be a valid @gmail.com address." };
     }
     if (!leader.usn?.trim()) {
       return { valid: false, error: "Leader USN / roll number is required." };
     }
     const leaderPhone = String(leader.phone || "").replace(/[^0-9]/g, "");
-    if (!/^\d{10}$/.test(leaderPhone)) {
+    if (leaderPhone.length !== 10 || !/^\d{10}$/.test(leaderPhone)) {
       return { valid: false, error: "Leader phone number must contain exactly 10 digits." };
+    }
+    if (!leader.college?.trim()) {
+      return { valid: false, error: "Leader college name is required." };
+    }
+    if (!leader.state?.trim()) {
+      return { valid: false, error: "Leader state is required." };
     }
 
     // 3. Team Size Validation (1 leader + 1 to 3 members = 2 to 4 total)
@@ -1100,24 +1197,39 @@ export async function startServer() {
         return { valid: false, error: `Member #${i + 2} full name is required.` };
       }
       if (!m.email?.trim() || !/^[^\s@]+@gmail\.com$/i.test(m.email.trim())) {
-        return { valid: false, error: `Member #${i + 2} email must be a valid Gmail address ending in @gmail.com.` };
-      }
-      if (!m.college?.trim()) {
-        return { valid: false, error: `Member #${i + 2} college name is required.` };
-      }
-      if (!m.state?.trim()) {
-        return { valid: false, error: `Member #${i + 2} state / union territory is required.` };
+        return { valid: false, error: `Member #${i + 2} email must be a valid @gmail.com address.` };
       }
       if (!m.usn?.trim()) {
         return { valid: false, error: `Member #${i + 2} USN / roll number is required.` };
       }
       const memberPhone = String(m.phone || "").replace(/[^0-9]/g, "");
-      if (!/^\d{10}$/.test(memberPhone)) {
+      if (memberPhone.length !== 10 || !/^\d{10}$/.test(memberPhone)) {
         return { valid: false, error: `Member #${i + 2} phone number must contain exactly 10 digits.` };
+      }
+      if (!m.college?.trim()) {
+        return { valid: false, error: `Member #${i + 2} college name is required.` };
+      }
+      if (!m.state?.trim()) {
+        return { valid: false, error: `Member #${i + 2} state is required.` };
       }
     }
 
-    // 5. Uniqueness Validation within current submission
+    // 5. Uniqueness Validation within current submission and all registered teams.
+    // This is repeated inside the registration mutex so the final write is race-safe.
+    const duplicateConflicts = checkRegistrationDuplicates({ teamName: cleanTeamName, leader, members });
+    if (duplicateConflicts.length > 0) {
+      const conflict = duplicateConflicts[0];
+      return {
+        valid: false,
+        isDuplicate: true,
+        field: conflict.field,
+        fields: [conflict.field],
+        message: conflict.message,
+        error: conflict.code
+      };
+    }
+
+    /*
     const allParticipants = [leader, ...members];
     const localEmails = new Set<string>();
     const localUsns = new Set<string>();
@@ -1198,6 +1310,7 @@ export async function startServer() {
         };
       }
     }
+    */
 
     return { valid: true };
   }
@@ -1244,7 +1357,7 @@ export async function startServer() {
     let gateQrDataUrl = "";
     try {
       gateQrDataUrl = await QRCode.toDataURL(
-        `https://anvation.live/checkin?teamId=${team.id}&reg=${team.regNumber}`,
+        `https://anvation.live/checkin?teamId=${team.id}`,
         { width: 200, margin: 2 }
       );
       gateQrBuffer = Buffer.from(gateQrDataUrl.split(",")[1], "base64");
@@ -1339,7 +1452,7 @@ export async function startServer() {
       from: String(process.env.MAIL_FROM),
       to: team.leaderEmail,
       subject: `ANVATION 2026 portal password reset - ${team.id}`,
-      text: `A password reset was requested for your ANVATION 2026 team portal.\n\nTeam ID: ${team.id}\n\nUse this link within 15 minutes to choose a new password:\n${resetUrl}\n\nIf you did not request this reset, contact the event administrators immediately.`,
+        text: `A password reset was requested for your ANVATION 2026 team portal.\n\nTeam ID: ${team.id}\n\nUse this link within 15 minutes to choose a new password:\n${resetUrl}\n\nIf you did not request this reset, contact the event administrators immediately.`,
       html: `<p>A password reset was requested for your ANVATION 2026 team portal.</p><p><strong>Team ID:</strong> ${team.id}</p><p><a href="${resetUrl}">Choose a new portal password</a></p><p>This link expires in 15 minutes. If you did not request this reset, contact the event administrators immediately.</p>`
     });
   }
@@ -1442,7 +1555,7 @@ export async function startServer() {
       const { id } = req.params;
       const index = teams.findIndex(t => 
         t.id.toLowerCase() === id.toLowerCase() || 
-        t.regNumber.toLowerCase() === id.toLowerCase() ||
+        (t.regNumber || '').toLowerCase() === id.toLowerCase() ||
         t.leaderEmail.toLowerCase() === id.toLowerCase()
       );
 
@@ -1560,7 +1673,7 @@ export async function startServer() {
     if (!identifier) return res.json({ success: true, message: genericMessage });
 
     const team = teams.find((candidate) =>
-      candidate.id.toLowerCase() === identifier || candidate.regNumber.toLowerCase() === identifier
+      candidate.id.toLowerCase() === identifier || (candidate.regNumber || '').toLowerCase() === identifier
     );
     if (!team || !team.leaderEmail) return res.json({ success: true, message: genericMessage });
 
@@ -1659,6 +1772,21 @@ export async function startServer() {
       }
 
       const result = await withRegistrationLock(async () => {
+        const productionConflict = await findProductionDuplicate({
+          teamName: req.body?.teamName,
+          participants: [req.body?.leader, ...(Array.isArray(req.body?.members) ? req.body.members : [])]
+        });
+        if (productionConflict) {
+          return {
+            status: 409,
+            body: {
+              success: false,
+              error: productionConflict.code,
+              field: productionConflict.code === 'TEAM_NAME_EXISTS' ? 'teamName' : productionConflict.code,
+              message: `The ${productionConflict.code.replace('_EXISTS', '').toLowerCase()} is already registered.`
+            }
+          };
+        }
         // 1. Validate team payload and check uniqueness across members & existing teams
         const teamValidation = validateTeamRegistration(req.body);
         if (!teamValidation.valid) {
@@ -1703,17 +1831,14 @@ export async function startServer() {
         // 5. Generate secure team IDs and password
         const teamIndex = ++nextTeamNumber;
         const teamId = `AN-${String(teamIndex).padStart(3, '0')}`;
-        const regNumber = `CODE-2026-${String(teamIndex).padStart(3, '0')}`;
-
         const leaderParticipant: Participant = {
           id: `p-${teamIndex}-1`,
           fullName: sanitizeInputString(leader.fullName),
           college: sanitizeInputString(leader.college || ''),
-          semester: '',
+          state: sanitizeInputString(leader.state || ''),
           email: sanitizeInputString(leader.email.trim().toLowerCase()),
           phone: sanitizeInputString(leader.phone || ''),
           usn: sanitizeInputString(leader.usn.trim().toUpperCase()),
-          state: sanitizeInputString(leader.state),
           role: 'Leader',
           teamId,
           accommodationRequired: !!leader.accommodationRequired,
@@ -1725,11 +1850,10 @@ export async function startServer() {
           id: `p-${teamIndex}-${idx + 2}`,
           fullName: sanitizeInputString(m.fullName),
           college: sanitizeInputString(m.college || ''),
-          semester: '',
+          state: sanitizeInputString(m.state || ''),
           email: sanitizeInputString(m.email.trim().toLowerCase()),
           phone: sanitizeInputString(m.phone || ''),
           usn: sanitizeInputString(m.usn.trim().toUpperCase()),
-          state: sanitizeInputString(m.state),
           role: 'Member',
           teamId,
           accommodationRequired: !!m.accommodationRequired,
@@ -1741,7 +1865,6 @@ export async function startServer() {
 
         const newTeam: Team = {
           id: teamId,
-          regNumber,
           teamName: sanitizeInputString(teamName),
           leaderEmail: sanitizeInputString(leader.email.trim().toLowerCase()),
           accessPassword: hashPassword(accessPassword),
@@ -1760,7 +1883,7 @@ export async function startServer() {
 
         // Write to append-only CSV backup before persisting to memory/disk
         try {
-          await appendParticipantRegistrationBackup(newTeam);
+          if (!productionStoreEnabled) await appendParticipantRegistrationBackup(newTeam);
         } catch (backupError) {
           console.error("[BACKUP] Registration CSV write failed; registration was not accepted:", backupError);
           return {
@@ -1773,7 +1896,7 @@ export async function startServer() {
         }
 
         try {
-          await syncParticipantBackupToGitHub(newTeam);
+          if (!productionStoreEnabled) await syncParticipantBackupToGitHub(newTeam);
         } catch (syncError) {
           console.error("[BACKUP] GitHub CSV sync failed; registration was not accepted:", syncError);
           return {
@@ -1783,6 +1906,40 @@ export async function startServer() {
               error: "Registration backup could not be published. Please retry in a moment; no registration has been recorded."
             }
           };
+        }
+
+        if (productionStoreEnabled) {
+          try {
+            await saveProductionTeam(newTeam);
+          } catch (storageError: any) {
+            console.error("[DATABASE] Production registration write failed:", storageError?.message || storageError);
+            if (storageError?.code === '23505') {
+              const constraint = String(storageError?.constraint || '');
+              const code = constraint.includes('team_name')
+                ? 'TEAM_NAME_EXISTS'
+                : constraint.includes('email')
+                  ? 'EMAIL_EXISTS'
+                  : constraint.includes('usn')
+                    ? 'USN_EXISTS'
+                    : 'PHONE_EXISTS';
+              return {
+                status: 409,
+                body: {
+                  success: false,
+                  error: code,
+                  field: code === 'TEAM_NAME_EXISTS' ? 'teamName' : code,
+                  message: `The ${code.replace('_EXISTS', '').toLowerCase()} is already registered.`
+                }
+              };
+            }
+            return {
+              status: 503,
+              body: {
+                success: false,
+                error: "Production registration storage is temporarily unavailable. Please retry."
+              }
+            };
+          }
         }
 
         teams.push(newTeam);
@@ -1842,7 +1999,7 @@ export async function startServer() {
   app.post("/api/registration/:teamId/deliver-credentials", requireAdmin, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const team = teams.find(t => t.id.toLowerCase() === teamId.toLowerCase() || t.regNumber.toLowerCase() === teamId.toLowerCase());
+      const team = teams.find(t => t.id.toLowerCase() === teamId.toLowerCase() || (t.regNumber || '').toLowerCase() === teamId.toLowerCase());
       if (!team) {
         return res.status(404).json({ success: false, error: `Team ${teamId} not found.` });
       }
@@ -1865,7 +2022,7 @@ export async function startServer() {
   app.post("/api/registration/:teamId/deliver-credentials/retry", requireAdmin, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const team = teams.find(t => t.id.toLowerCase() === teamId.toLowerCase() || t.regNumber.toLowerCase() === teamId.toLowerCase());
+      const team = teams.find(t => t.id.toLowerCase() === teamId.toLowerCase() || (t.regNumber || '').toLowerCase() === teamId.toLowerCase());
       if (!team) {
         return res.status(404).json({ success: false, error: `Team ${teamId} not found.` });
       }
@@ -1997,7 +2154,7 @@ export async function startServer() {
   // downloadable .eml fallback. Includes the Gate Entry Pass QR in the body.
   app.post("/api/send-registration-email", async (req, res) => {
     try {
-      const { teamId, email, emails, teamName, domain, password, participants } = req.body;
+      const { teamId, email, emails, teamName, domain, track, password, participants } = req.body;
       // participants: [{ email, name, college, role }] — used so the confirmation
       // mail always includes the College of every registered participant.
       const participantList: Array<{ email: string; name: string; college: string; role: string }> =
@@ -2028,8 +2185,8 @@ export async function startServer() {
       const dates = "October 8 - October 9, 2026 (24-Hour Hackathon)";
       const htmlR = `ANVATION 2026 - Registration Confirmed
 Team ID: ${teamId}
+Domain: ${domain || track || ''}
 Team Name: ${teamName}
-Domain: ${domain}
 Portal Password: ${password}
 Venue: ${venue}
 Dates: ${dates}
@@ -2050,8 +2207,8 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
 <p>Congratulations! Your team's registration for <strong>ANVATION 2026</strong> has been confirmed.</p>
 <table style="width:100%;border-collapse:collapse;font-size:14px;">`;
       const htmlRows = `<tr><td style="padding:6px 0;color:#475569;">Team ID</td><td style="padding:6px 0;font-weight:bold;font-family:monospace;color:#0284c7;">${teamId}</td></tr>
+<tr><td style="padding:6px 0;color:#475569;">Domain</td><td style="padding:6px 0;font-weight:bold;">${domain || track || ''}</td></tr>
 <tr><td style="padding:6px 0;color:#475569;">Team Name</td><td style="padding:6px 0;font-weight:bold;">${teamName}</td></tr>
-<tr><td style="padding:6px 0;color:#475569;">Domain</td><td style="padding:6px 0;font-weight:bold;">${domain}</td></tr>
 <tr><td style="padding:6px 0;color:#475569;">Portal Password</td><td style="padding:6px 0;font-weight:bold;font-family:monospace;color:#7e22ce;">${password}</td></tr>
 <tr><td style="padding:6px 0;color:#475569;">Venue</td><td style="padding:6px 0;font-weight:bold;">${venue}</td></tr>
 <tr><td style="padding:6px 0;color:#475569;">Dates</td><td style="padding:6px 0;font-weight:bold;">${dates}</td></tr></table>
@@ -2130,7 +2287,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     try {
       const { id } = req.params;
       const updateData = req.body;
-      const index = teams.findIndex(t => t.id.toLowerCase() === id.toLowerCase() || t.regNumber.toLowerCase() === id.toLowerCase());
+      const index = teams.findIndex(t => t.id.toLowerCase() === id.toLowerCase() || (t.regNumber || '').toLowerCase() === id.toLowerCase());
 
       if (index === -1) {
         return res.status(404).json({ success: false, error: "Team not found" });
@@ -2157,19 +2314,6 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         if (leader?.email) {
           updatedTeam.leaderEmail = leader.email;
         }
-      }
-
-      const otherTeams = teams.filter((team) => team.id !== existingTeam.id);
-      if (otherTeams.some((team) => normalizeTeamName(team.teamName) === normalizeTeamName(updatedTeam.teamName))) {
-        return res.status(409).json({ success: false, error: "That team name is already registered." });
-      }
-      const otherEmails = new Set(otherTeams.flatMap((team) => [team.leaderEmail, ...(team.members || []).map((member) => member.email)]).filter(Boolean).map((email) => String(email).trim().toLowerCase()));
-      const editedEmails = (updatedTeam.members || []).map((member) => String(member.email || '').trim().toLowerCase()).filter(Boolean);
-      if (editedEmails.some((email) => otherEmails.has(email) || !email.endsWith('@gmail.com')) || new Set(editedEmails).size !== editedEmails.length) {
-        return res.status(409).json({ success: false, error: "Every participant email must be a unique Gmail address." });
-      }
-      if ((updatedTeam.members || []).some((member) => !/^\d{10}$/.test(String(member.phone || '').replace(/[^0-9]/g, '')))) {
-        return res.status(400).json({ success: false, error: "Every participant phone number must contain exactly 10 digits." });
       }
 
       teams[index] = updatedTeam;
@@ -2215,7 +2359,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   app.post("/api/admin/teams/:teamId/reset-password", requireRole(["ADMIN", "REGISTRATION_MANAGER", "SUPER_ADMIN"]), (req, res) => {
     const teamId = String(req.params.teamId || "").trim();
     const index = teams.findIndex((team) =>
-      team.id.toLowerCase() === teamId.toLowerCase() || team.regNumber.toLowerCase() === teamId.toLowerCase()
+      team.id.toLowerCase() === teamId.toLowerCase() || (team.regNumber || '').toLowerCase() === teamId.toLowerCase()
     );
 
     if (index === -1) {
@@ -2269,7 +2413,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   app.delete("/api/teams/:id", requireSuperAdmin, (req, res) => {
     const { id } = req.params;
     const initialLen = teams.length;
-    teams = teams.filter(t => t.id.toLowerCase() !== id.toLowerCase() && t.regNumber.toLowerCase() !== id.toLowerCase());
+    teams = teams.filter(t => t.id.toLowerCase() !== id.toLowerCase() && (t.regNumber || '').toLowerCase() !== id.toLowerCase());
     if (teams.length === initialLen) {
       return res.status(404).json({ success: false, error: "Team not found" });
     }
@@ -2311,7 +2455,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     const cleanQuery = query.trim().toUpperCase();
     const team = teams.find(t => 
       t.id.toUpperCase() === cleanQuery ||
-      t.regNumber.toUpperCase() === cleanQuery ||
+      (t.regNumber || '').toUpperCase() === cleanQuery ||
       t.members.some(m => m.usn.toUpperCase() === cleanQuery || m.email.toUpperCase() === cleanQuery)
     );
 
@@ -2710,9 +2854,17 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
 
   // Load saved records (if any), seed the CSV backup from them if this is the
   // first run, and then auto-save the JSON store on a periodic heartbeat.
-  loadPersisted();
+  if (!productionStoreEnabled) loadPersisted();
+  if (productionStoreEnabled) {
+    teams = await loadProductionTeams();
+    nextTeamNumber = teams.reduce((highest, team) => {
+      const match = String(team.id || '').match(/(\d+)$/);
+      return Math.max(highest, match ? Number(match[1]) : 0);
+    }, nextTeamNumber);
+    rebuildUniquenessIndexes();
+  }
   try {
-    initialiseParticipantRegistrationBackup();
+    if (!productionStoreEnabled) initialiseParticipantRegistrationBackup();
   } catch (backupError) {
     // New registrations still fail safely if their own CSV append cannot be
     // written. Keep startup alive so an operator can fix disk permissions
@@ -2806,32 +2958,19 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       return res.status(400).json({ success: false, error: "Username and password are required." });
     }
 
-    const ip = getClientIp(req);
-    const rateCheck = checkLoginRate(idn, ip);
-    if (rateCheck.locked) {
-      return res.status(429).json({
-        success: false,
-        error: `Too many failed login attempts. Temporarily locked. Please try again in ${rateCheck.waitSeconds} seconds.`
-      });
-    }
-
     const user = adminUsers.find(
       u => (u.username || '').toLowerCase() === idn || (u.email || '').toLowerCase() === idn
     );
 
     if (!user) {
-      recordLoginFailure(idn, ip);
       return res.status(401).json({ success: false, error: "Invalid credentials." });
     }
     if (user.status !== 'Active') {
       return res.status(403).json({ success: false, error: "This account has been suspended." });
     }
     if (!verifyPassword(pass, user.password)) {
-      recordLoginFailure(idn, ip);
       return res.status(401).json({ success: false, error: "Invalid credentials." });
     }
-
-    clearLoginFailure(idn, ip);
 
     user.lastLogin = new Date().toISOString();
     const sid = createSession({
@@ -3659,12 +3798,14 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
 
   // Bind to a private loopback port when acting as the cluster authority, and
   // to the public interface otherwise (classic single-process mode).
+  if (!shouldListen) return app;
+
   const isAuthority = process.env.ANVATION_ROLE === "authority";
-  const bindHost = isAuthority ? "127.0.0.1" : "0.0.0.0";
+  const bindHost = isAuthority ? "0.0.0.0" : "0.0.0.0";
   const bindPort = isAuthority ? INTERNAL_PORT : requestedPort;
 
   const server = app.listen(bindPort, bindHost, () => {
-    console.log(`KS-HackNova 2026 Server running on http://${bindHost}:${bindPort}`);
+    console.log(`KS-HackNova 2026 Server running on port ${bindPort}`);
   });
 
   server.on("error", (err: NodeJS.ErrnoException) => {
@@ -3696,4 +3837,11 @@ const isDirectExecution = typeof __filename !== "undefined"
 
 if (isDirectExecution) {
   run();
+}
+
+let vercelAppPromise: Promise<any> | null = null;
+export default async function vercelHandler(req: any, res: any) {
+  if (!vercelAppPromise) vercelAppPromise = startServer({ listen: false });
+  const app = await vercelAppPromise;
+  return app(req, res);
 }

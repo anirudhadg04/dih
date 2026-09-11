@@ -1,13 +1,14 @@
 import { HackathonTrack, ScheduleItem, Sponsor, Judge, Mentor, FAQItem, Team, Announcement, SupportTicket, ProjectSubmission, JudgeScorecard } from '../types';
 
 export const INDIA_STATES_AND_UTS = [
-  'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam',
-  'Bihar', 'Chandigarh', 'Chhattisgarh', 'Dadra and Nagar Haveli and Daman and Diu',
-  'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir',
-  'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh',
-  'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha',
-  'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana',
-  'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
+'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam',
+'Bihar', 'Chandigarh', 'Chhattisgarh', 'Dadra and Nagar Haveli and Daman and Diu',
+'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir',
+'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh',
+'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha',
+'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana',
+'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
+
 ] as const;
 
 export const COLLEGE_INFO = {
@@ -34,7 +35,7 @@ export const COLLEGE_INFO = {
   dates: '8th - 9th October 2026',
   time: '9:30 AM to 9:30 AM (24-Hour Non-stop Hackathon)',
   venue: 'KSSEM Campus, Bengaluru',
-  entryFee: '₹500 per team',
+  entryFee: '₹250 per participant',
   teamSize: '2-4 Members',
   prizePool: '₹50,000',
   totalSeats: 350,

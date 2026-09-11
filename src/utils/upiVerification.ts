@@ -1,4 +1,6 @@
-export const PAYMENT_UPI_ID = 'fcbizdgbveu@freecharge';
+export const PAYMENT_UPI_ID = (typeof process !== 'undefined' && process.env.PAYMENT_UPI_ID)
+  || import.meta.env?.VITE_PAYMENT_UPI_ID
+  || 'fcbizdgbveu@freecharge';
 
 const TRANSACTION_ID_PATTERN = /(?<!\d)\d{12}(?!\d)/g;
 const EXPLICIT_UTR_PATTERN = /(?:^|\n)\s*utr\s*[:#-]?\s*(\d{12})(?!\d)/gim;

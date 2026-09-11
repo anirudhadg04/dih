@@ -72,7 +72,7 @@ export const CheckInScanner: React.FC<CheckInScannerProps> = ({ teams, onUpdateT
     // Search for matching team by id, regNumber, or leader email or member USN
     const match = teams.find(t => 
       t.id.toLowerCase() === trimmed.toLowerCase() ||
-      t.regNumber.toLowerCase() === trimmed.toLowerCase() ||
+      (t.regNumber || '').toLowerCase() === trimmed.toLowerCase() ||
       t.leaderEmail.toLowerCase() === trimmed.toLowerCase() ||
       t.members.some(m => m.usn.toLowerCase() === trimmed.toLowerCase() || m.email.toLowerCase() === trimmed.toLowerCase())
     );
@@ -361,7 +361,7 @@ export const CheckInScanner: React.FC<CheckInScannerProps> = ({ teams, onUpdateT
                     </span>
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5">
-                    Track: <span className="text-amber-300 font-semibold">{scannedTeam.preferredTrack}</span> | Reg #: <span className="text-slate-300">{scannedTeam.regNumber}</span>
+                    Domain: <span className="text-amber-300 font-semibold">{scannedTeam.domain || scannedTeam.preferredTrack}</span>
                   </div>
                 </div>
 
@@ -532,7 +532,7 @@ export const CheckInScanner: React.FC<CheckInScannerProps> = ({ teams, onUpdateT
               <tr>
                 <th className="p-3">Team ID</th>
                 <th className="p-3">Team Name</th>
-                <th className="p-3">Track</th>
+                <th className="p-3">Domain</th>
                 <th className="p-3">Members</th>
                 <th className="p-3">Status Indicator</th>
                 <th className="p-3 text-right">Action</th>
@@ -545,7 +545,7 @@ export const CheckInScanner: React.FC<CheckInScannerProps> = ({ teams, onUpdateT
                   <tr key={t.id} className="hover:bg-slate-800/50 transition-colors">
                     <td className="p-3 font-mono font-bold text-cyan-400">{t.id}</td>
                     <td className="p-3 font-extrabold text-white">{t.teamName}</td>
-                    <td className="p-3 text-slate-300">{t.preferredTrack}</td>
+                    <td className="p-3 text-slate-300">{t.domain || t.preferredTrack}</td>
                     <td className="p-3 text-slate-400">{t.members.length} Members</td>
                     <td className="p-3">
                       {isCheckedIn ? (

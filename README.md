@@ -137,12 +137,15 @@ opens the registration and rulebook modals globally.
 
 ## Backend and data
 
-`server.ts` is the authoritative application process. It owns the JSON data
-file, so all registration, team, participant, submission, judging, and admin
-mutations should go through the API rather than editing `server-data.json`
-directly.
+`server.ts` is the authoritative API. In local development it can use the JSON
+data file, but when `DATABASE_URL` is configured it loads and writes live
+registrations through the production Postgres store. All registration, team,
+participant, and payment mutations should go through the API rather than
+editing local files directly.
 
-The server also maintains:
+For Vercel production, set `DATABASE_URL` to a Neon/Vercel Postgres connection. Registrations, participants, payment UTR/proof metadata, and global uniqueness constraints are stored in Postgres; Vercel's ephemeral filesystem is never used for live registrations. To migrate an existing local `server-data.json` once, set `DATABASE_URL` and run `npm run migrate:production` before deployment.
+
+The server also maintains locally:
 
 - A participant registration CSV backup under `backups/`.
 - Optional Git-backed CSV synchronization when explicitly enabled.
@@ -189,7 +192,7 @@ npm install
 npm run dev
 ```
 
-The combined server runs on `http://localhost:3001` by default. It serves the
+The combined server runs on the configured `PORT` (3001 by default for local development). It serves the
 React app through Vite middleware and exposes the API under `/api`. The Vite
 configuration also defines port `5173` for direct Vite usage, but the normal
 project workflow is `npm run dev`, which starts `server.ts` through `tsx`.
