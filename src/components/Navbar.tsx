@@ -144,20 +144,18 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Shared Navigation Sub-bar */}
-      {currentView === 'landing' && (
-        <nav className="hidden lg:flex items-center justify-center gap-8 min-h-12 px-4 border-t border-slate-800/80 text-sm font-medium text-slate-300">
-          {navItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => scrollToSection(item.id)}
-              className="hover:text-pink-400 transition-colors py-2"
-              id={`nav-${item.id}-btn`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      )}
+      <nav className="hidden lg:flex items-center justify-center gap-8 min-h-12 px-4 border-t border-slate-800/80 text-sm font-medium text-slate-300">
+        {navItems.map(item => (
+          <button
+            key={item.id}
+            onClick={() => scrollToSection(item.id)}
+            className="hover:text-pink-400 transition-colors py-2"
+            id={`nav-${item.id}-btn`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
@@ -173,7 +171,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="flex flex-col gap-3 font-medium text-slate-200 pt-2 border-t border-slate-800">
-            {currentView === 'landing' && navItems.map(item => (
+            {navItems.map(item => (
               <button
                 key={item.id}
                 onClick={() => scrollToSection(item.id)}

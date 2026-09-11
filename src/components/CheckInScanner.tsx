@@ -69,7 +69,7 @@ export const CheckInScanner: React.FC<CheckInScannerProps> = ({ teams, onUpdateT
     const trimmed = qrCodeString.trim();
     if (!trimmed) return;
 
-    // Search for matching team ID, legacy registration number, email, or USN.
+    // Search for matching team by id, regNumber, or leader email or member USN
     const match = teams.find(t => 
       t.id.toLowerCase() === trimmed.toLowerCase() ||
       t.regNumber.toLowerCase() === trimmed.toLowerCase() ||
@@ -361,7 +361,7 @@ export const CheckInScanner: React.FC<CheckInScannerProps> = ({ teams, onUpdateT
                     </span>
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5">
-                                    Domain: <span className="text-amber-300 font-semibold">{scannedTeam.domain || scannedTeam.preferredTrack}</span>
+                    Track: <span className="text-amber-300 font-semibold">{scannedTeam.preferredTrack}</span> | Reg #: <span className="text-slate-300">{scannedTeam.regNumber}</span>
                   </div>
                 </div>
 

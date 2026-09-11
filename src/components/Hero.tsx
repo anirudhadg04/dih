@@ -31,9 +31,9 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
   });
 
   const requirementItems = [
-    { title: 'TEAM SIZE', text: '2–4 members per team', accent: 'cyan' },
-    { title: 'REGISTRATION COST', text: '₹250 per member', accent: 'sky' },
-    { title: 'SUBMISSION', text: 'Working prototype + demo + presentation', accent: 'emerald' }
+    { title: 'NETWORKING', text: 'Connect With Industry Mentors', accent: 'cyan' },
+    { title: 'CERTFICATES', text: 'Verified E-Certificates', accent: 'sky' },
+    { title: 'KNOWLEDGE', text: 'Learn teamwork and skills', accent: 'emerald' }
   ];
 
   // Dynamic Countdown Timer targeted precisely to October 8, 2026 09:30:00 AM IST
@@ -259,13 +259,13 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
                   </div>
                 </div>
 
-                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900/90 to-emerald-950/50 border border-emerald-500/25 flex items-center gap-3 hover:border-emerald-400/50 hover:shadow-[0_0_16px_rgba(52,211,153,0.18)] transition-all">
-                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 shrink-0">
+                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900/90 to-amber-950/50 border border-amber-500/25 flex items-center gap-3 hover:border-amber-400/50 hover:shadow-[0_0_16px_rgba(251,191,36,0.18)] transition-all">
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
                     <Trophy className="w-4 h-4" />
                   </div>
                   <div>
                     <div className="text-[14px] font-black text-white">₹50,000</div>
-                    <div className="text-[12px] text-emerald-200/80 font-semibold">Total Prize Pool</div>
+                    <div className="text-[12px] text-amber-200/80 font-semibold">Total Prize Pool</div>
                   </div>
                 </div>
 
@@ -279,38 +279,30 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
                   </div>
                 </div>
 
-                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900/90 to-amber-950/50 border border-amber-500/25 flex items-center gap-3 hover:border-amber-400/50 hover:shadow-[0_0_16px_rgba(251,191,36,0.18)] transition-all">
-                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
+                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900/90 to-emerald-950/50 border border-emerald-500/25 flex items-center gap-3 hover:border-emerald-400/50 hover:shadow-[0_0_16px_rgba(52,211,153,0.18)] transition-all">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 shrink-0">
                     <Award className="w-4 h-4" />
                   </div>
                   <div>
                     <div className="text-[14px] font-black text-white">Free Food & Stay</div>
-                    <div className="text-[12px] text-slate-400 font-semibold">4 Meals Included</div>
+                    <div className="text-[12px] text-emerald-200/80 font-semibold">4 Meals Included</div>
                   </div>
                 </div>
               </div>
 
               {/* Event Benefits Checklist */}
-              <div className="pt-2 border-t border-slate-800 space-y-2">
-                <div className="text-[12px] font-bold text-slate-400 uppercase tracking-wider font-mono">
-                  PARTICIPANT ADVANTAGES
+              <div className="pt-2 border-t border-slate-800 space-y-3 w-full">
+                <div className="text-[14px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                  REQUIREMENTS
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                    <span>Connect With Industry Mentors</span>
+                <div className="grid grid-cols-1 gap-2 text-[13px] text-slate-300 sm:grid-cols-2">
+                  <div className="flex items-start gap-2">
+                    <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">Team: 2-4 Members</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Free WiFi & Labs</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                    <span>Verified E-Certificates</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>Networking & Collaboration</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">Registration cost: ₹250 per member</span>
                   </div>
                 </div>
               </div>
@@ -321,8 +313,8 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
         </div>
 
         {/* Countdown and requirements panel aligned below the hero cards without resizing the existing windows */}
-        <div className="flex justify-center">
-          <div className="grid w-full max-w-[1280px] grid-cols-1 gap-4 justify-center lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+        <div className="flex w-full justify-center lg:justify-between">
+          <div className="grid w-full max-w-[1280px] grid-cols-1 gap-4 items-stretch justify-items-stretch lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
             <div className="p-4 h-[180px] w-full rounded-2xl bg-slate-950/90 backdrop-blur-xl border border-cyan-400/40 shadow-[0_0_30px_rgba(6,182,212,0.2)]">
               <div className="text-xs font-extrabold text-cyan-300 uppercase tracking-widest mb-2.5 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -358,18 +350,29 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
             <div className="p-4 h-[180px] w-full rounded-2xl bg-gradient-to-b from-slate-950/95 to-slate-950/90 backdrop-blur-xl border border-violet-500/35 shadow-[0_0_24px_rgba(168,85,247,0.18)]">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-violet-400" />
-                  <span className="font-mono text-[14px] font-black text-white tracking-wider uppercase">REQUIREMENTS</span>
+                  <span className="font-mono text-[14px] font-black text-white tracking-wider uppercase">BENIFITS</span>
                 </div>
               </div>
 
-              <div className="mt-3 grid grid-cols-3 gap-2 h-[calc(100%-52px)]">
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3 h-[calc(100%-52px)]">
                 {requirementItems.map((item) => (
                   <div
                     key={item.title}
-                    className={`p-2 rounded-xl border bg-gradient-to-br from-slate-900/90 to-${item.accent === 'cyan' ? 'cyan-950/50' : item.accent === 'sky' ? 'sky-950/50' : 'emerald-950/50'} border-${item.accent === 'cyan' ? 'cyan-500/25' : item.accent === 'sky' ? 'sky-500/25' : 'emerald-500/25'} flex flex-col justify-center gap-2`}
+                    className={`p-2 rounded-xl border flex flex-col justify-center gap-2 ${
+                      item.accent === 'cyan'
+                        ? 'border-cyan-500/25 bg-gradient-to-br from-slate-900/90 to-cyan-950/50'
+                        : item.accent === 'sky'
+                          ? 'border-sky-500/25 bg-gradient-to-br from-slate-900/90 to-sky-950/50'
+                          : 'border-emerald-500/25 bg-gradient-to-br from-slate-900/90 to-emerald-950/50'
+                    }`}
                   >
-                    <div className={`flex h-7 w-7 items-center justify-center rounded-lg bg-${item.accent}-500/10 border border-${item.accent}-500/30 text-${item.accent}-400`}>
+                    <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${
+                      item.accent === 'cyan'
+                        ? 'bg-cyan-500/10 border border-cyan-500/30 text-cyan-400'
+                        : item.accent === 'sky'
+                          ? 'bg-sky-500/10 border border-sky-500/30 text-sky-400'
+                          : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+                    }`}>
                       <CheckCircle2 className="w-3.5 h-3.5" />
                     </div>
                     <div className="min-w-0">

@@ -1605,7 +1605,7 @@ export const AdminPortal: React.FC = () => {
                             <div>
                               <div className="font-bold text-white flex items-center gap-2">
                                 {team.teamName}
-                                <span className="font-mono text-[10px] text-purple-400">({team.id})</span>
+                                <span className="font-mono text-[10px] text-purple-400">({team.regNumber || team.id})</span>
                               </div>
                               <div className="text-[11px] text-slate-400">
                                 {team.domain || team.preferredTrack} • {team.members.length} Members • {team.leaderEmail}
@@ -1770,7 +1770,7 @@ export const AdminPortal: React.FC = () => {
                           </td>
                           <td className="p-3">
                             <div className="text-slate-300">{p.college}</div>
-                            <div className="text-[10px] text-slate-500">{p.state || 'State not provided'}</div>
+                            <div className="text-[10px] text-slate-500">{p.department} (Sem {p.semester})</div>
                           </td>
                           <td className="p-3">
                             <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
@@ -1891,7 +1891,7 @@ export const AdminPortal: React.FC = () => {
                     </div>
 
                     <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-900">
-                      <span className="text-[10px] text-slate-500 font-mono">Team ID: {t.id}</span>
+                      <span className="text-[10px] text-slate-500 font-mono">Reg: {t.regNumber}</span>
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => handleOpenEditTeam(t)}
@@ -2375,7 +2375,7 @@ export const AdminPortal: React.FC = () => {
                   <div key={sub.id} className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-800 pb-2">
                       <div>
-                        <span className="text-[10px] font-mono text-cyan-400">{sub.teamId} • Domain: {sub.track}</span>
+                        <span className="text-[10px] font-mono text-cyan-400">{sub.teamId} • Track: {sub.track}</span>
                         <h4 className="text-base font-black text-white">{sub.projectTitle} ({sub.teamName})</h4>
                       </div>
                       <button
@@ -3401,11 +3401,9 @@ export const AdminPortal: React.FC = () => {
                         <th className="p-3">Team ID & Name</th>
                         <th className="p-3">Leader Email</th>
                         <th className="p-3">Amount</th>
-                        <th className="p-3">Payment Detail</th>
                         <th className="p-3">UTR Reference No</th>
                         <th className="p-3">Screenshot</th>
                         <th className="p-3">Status</th>
-                        <th className="p-3">Team Status</th>
                         <th className="p-3">Action</th>
                       </tr>
                     </thead>
@@ -3418,7 +3416,6 @@ export const AdminPortal: React.FC = () => {
                           </td>
                           <td className="p-3 text-slate-300 text-[11px]">{t.leaderEmail}</td>
                           <td className="p-3 font-mono font-bold text-emerald-400">₹{t.members.length * (cmsConfig.registrationFee || 250)}</td>
-                          <td className="p-3 text-slate-300 text-[11px] min-w-48">{t.paymentAmountDetail || 'Not specified'}</td>
                           <td className="p-3 font-mono text-amber-300 font-bold">{t.paymentUtr || 'N/A'}</td>
                           <td className="p-3">
                             {t.paymentScreenshot ? (
@@ -3442,7 +3439,6 @@ export const AdminPortal: React.FC = () => {
                               {t.paymentStatus || 'Pending'}
                             </span>
                           </td>
-                          <td className="p-3 text-slate-300 text-[11px]">{t.status}</td>
                           <td className="p-3 flex items-center gap-2">
                             <button
                               onClick={() => handleVerifyUTR(t.id, 'Verified')}
@@ -3598,9 +3594,10 @@ export const AdminPortal: React.FC = () => {
 
             <div className="space-y-2 text-xs text-slate-300">
               <div><strong>College:</strong> {selectedParticipantModal.college}</div>
-              <div><strong>State / Union Territory:</strong> {selectedParticipantModal.state || 'Not provided'}</div>
+              <div><strong>Department:</strong> {selectedParticipantModal.department} (Sem {selectedParticipantModal.semester})</div>
               <div><strong>Email:</strong> {selectedParticipantModal.email}</div>
               <div><strong>Phone:</strong> {selectedParticipantModal.phone}</div>
+              <div><strong>Emergency Contact:</strong> {selectedParticipantModal.emergencyContact}</div>
               <div><strong>Accommodation Required:</strong> {selectedParticipantModal.accommodationRequired ? 'YES' : 'NO'}</div>
               <div><strong>Gate Status:</strong> {selectedParticipantModal.checkedIn ? 'Checked-In ✓' : 'Not Checked-In'}</div>
             </div>
@@ -3812,7 +3809,7 @@ export const AdminPortal: React.FC = () => {
                   </div>
 
                   <div className="sm:col-span-2">
-                    <label className="block text-xs font-bold text-slate-300 mb-1">Domain:</label>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Preferred Track Domain:</label>
                     <select
                       value={editingTeam.domain || editingTeam.preferredTrack}
                       onChange={(e) => setEditingTeam({ ...editingTeam, domain: e.target.value, preferredTrack: e.target.value })}
@@ -3855,17 +3852,6 @@ export const AdminPortal: React.FC = () => {
                       className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-xs focus:border-cyan-500 outline-none"
                     />
                   </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-bold text-slate-300 mb-1">Payment Amount Detail:</label>
-                    <input
-                      type="text"
-                      value={editingTeam.paymentAmountDetail || ''}
-                      onChange={(e) => setEditingTeam({ ...editingTeam, paymentAmountDetail: e.target.value })}
-                      placeholder="e.g. Verified UTR; registration amount INR 250 pending admin settlement"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-cyan-500 outline-none"
-                    />
-                  </div>
                 </div>
               </div>
 
@@ -3883,13 +3869,16 @@ export const AdminPortal: React.FC = () => {
                           id: `p-${Date.now()}-${editingTeam.members.length + 1}`,
                           fullName: `Member ${editingTeam.members.length + 1}`,
                           college: editingTeam.members[0]?.college || 'KSSEM',
-                          state: editingTeam.members[0]?.state || '',
+                          department: 'CSE',
+                          semester: '6th Semester',
                           email: '',
                           phone: '',
                           usn: '',
+                          gender: 'Male',
                           role: 'Member',
                           teamId: editingTeam.id,
                           accommodationRequired: false,
+                          emergencyContact: '',
                           checkedIn: false
                         };
                         setEditingTeam({
@@ -3996,19 +3985,6 @@ export const AdminPortal: React.FC = () => {
                             onChange={(e) => {
                               const updated = [...editingTeam.members];
                               updated[idx] = { ...updated[idx], college: e.target.value };
-                              setEditingTeam({ ...editingTeam, members: updated });
-                            }}
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className="block text-[10px] text-slate-400 mb-0.5">State / Union Territory:</label>
-                          <input
-                            type="text"
-                            value={mem.state || ''}
-                            onChange={(e) => {
-                              const updated = [...editingTeam.members];
-                              updated[idx] = { ...updated[idx], state: e.target.value };
                               setEditingTeam({ ...editingTeam, members: updated });
                             }}
                             className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
