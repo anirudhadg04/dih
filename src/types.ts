@@ -4,17 +4,15 @@ export interface Participant {
   id: string;
   fullName: string;
   college: string;
-  department: string;
-  semester: string;
+  state?: string;
+  /** Legacy field retained for loading older persisted records. */
+  semester?: string;
   email: string;
   phone: string;
   usn: string;
-  githubUrl?: string;
-  linkedinUrl?: string;
   role: 'Leader' | 'Member';
   teamId: string;
   accommodationRequired: boolean;
-  emergencyContact: string;
   checkedIn: boolean;
   checkInTime?: string;
   foodCouponsClaimed?: {

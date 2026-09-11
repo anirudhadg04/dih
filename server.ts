@@ -766,21 +766,16 @@ export async function startServer() {
   const PARTICIPANT_BACKUP_HEADERS = [
     "registration_timestamp",
     "team_id",
-    "registration_number",
     "team_name",
-    "track",
-    "participant_id",
+    "domain",
     "participant_name",
     "role",
     "email",
     "phone",
     "usn",
-    "department",
-    "semester",
-    "github_url",
-    "linkedin_url",
+    "college",
+    "state",
     "accommodation_required",
-    "emergency_contact",
     "payment_utr",
     "payment_status",
     "payment_amount_detail",
@@ -814,21 +809,16 @@ export async function startServer() {
     const row = [
       team.createdAt,
       team.id,
-      team.regNumber,
       team.teamName,
       team.preferredTrack,
-      member.id,
       member.fullName,
       member.role,
       member.email,
       member.phone,
       member.usn,
-      member.department,
-      member.semester,
-      member.githubUrl,
-      member.linkedinUrl,
+      member.college,
+      member.state,
       member.accommodationRequired,
-      member.emergencyContact,
       team.paymentUtr,
       team.paymentStatus,
       team.paymentAmountDetail,
@@ -851,7 +841,31 @@ export async function startServer() {
     const hasData = fs.existsSync(PARTICIPANT_BACKUP_FILE) && fs.statSync(PARTICIPANT_BACKUP_FILE).size > 0;
     if (hasData) {
       const contents = fs.readFileSync(PARTICIPANT_BACKUP_FILE, "utf8");
-      if (!contents.split(/\r?\n/, 1)[0].includes(csvCell("payment_amount_detail"))) {
+      const header = contents.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0];
+      if (header.includes(csvCell("registration_number"))) {
+        const parseCsvLine = (line: string): string[] => {
+          const values: string[] = [];
+          let value = "";
+          let quoted = false;
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"' && line[i + 1] === '"' && quoted) { value += '"'; i++; continue; }
+            if (char === '"') { quoted = !quoted; continue; }
+            if (char === "," && !quoted) { values.push(value); value = ""; continue; }
+            value += char;
+          }
+          values.push(value);
+          return values;
+        };
+        const lines = contents.replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean).map(parseCsvLine);
+        const oldHeaders = lines.shift() || [];
+        const oldIndex = new Map(oldHeaders.map((name, index) => [name, index]));
+        const migratedRows = lines.map((row) => PARTICIPANT_BACKUP_HEADERS.map((name) => {
+          const legacyName = name === "domain" ? "track" : name;
+          return csvCell(row[oldIndex.get(legacyName) ?? -1] || "");
+        }).join(","));
+        fs.writeFileSync(PARTICIPANT_BACKUP_FILE, `\uFEFF${PARTICIPANT_BACKUP_HEADERS.map(csvCell).join(",")}\n${migratedRows.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+      } else if (!header.includes(csvCell("payment_amount_detail"))) {
         const migrated = contents.split(/\r?\n/).map((line, index) => {
           if (!line) return line;
           return index === 0 ? `${line},${csvCell("payment_amount_detail")}` : `${line},""`;
@@ -1051,15 +1065,21 @@ export async function startServer() {
     if (!leader.fullName?.trim()) {
       return { valid: false, error: "Leader full name is required." };
     }
-    if (!leader.email?.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leader.email.trim())) {
-      return { valid: false, error: "Valid leader email address is required." };
+    if (!leader.email?.trim() || !/^[^\s@]+@gmail\.com$/i.test(leader.email.trim())) {
+      return { valid: false, error: "Leader email must be a valid Gmail address ending in @gmail.com." };
+    }
+    if (!leader.college?.trim()) {
+      return { valid: false, error: "Leader college name is required." };
+    }
+    if (!leader.state?.trim()) {
+      return { valid: false, error: "Leader state / union territory is required." };
     }
     if (!leader.usn?.trim()) {
       return { valid: false, error: "Leader USN / roll number is required." };
     }
     const leaderPhone = String(leader.phone || "").replace(/[^0-9]/g, "");
-    if (leaderPhone.length < 7 || leaderPhone.length > 15) {
-      return { valid: false, error: "Valid leader phone number is required." };
+    if (!/^\d{10}$/.test(leaderPhone)) {
+      return { valid: false, error: "Leader phone number must contain exactly 10 digits." };
     }
 
     // 3. Team Size Validation (1 leader + 1 to 3 members = 2 to 4 total)
@@ -1079,15 +1099,21 @@ export async function startServer() {
       if (!m.fullName?.trim()) {
         return { valid: false, error: `Member #${i + 2} full name is required.` };
       }
-      if (!m.email?.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email.trim())) {
-        return { valid: false, error: `Member #${i + 2} valid email address is required.` };
+      if (!m.email?.trim() || !/^[^\s@]+@gmail\.com$/i.test(m.email.trim())) {
+        return { valid: false, error: `Member #${i + 2} email must be a valid Gmail address ending in @gmail.com.` };
+      }
+      if (!m.college?.trim()) {
+        return { valid: false, error: `Member #${i + 2} college name is required.` };
+      }
+      if (!m.state?.trim()) {
+        return { valid: false, error: `Member #${i + 2} state / union territory is required.` };
       }
       if (!m.usn?.trim()) {
         return { valid: false, error: `Member #${i + 2} USN / roll number is required.` };
       }
       const memberPhone = String(m.phone || "").replace(/[^0-9]/g, "");
-      if (memberPhone.length < 7 || memberPhone.length > 15) {
-        return { valid: false, error: `Valid Member #${i + 2} phone number is required.` };
+      if (!/^\d{10}$/.test(memberPhone)) {
+        return { valid: false, error: `Member #${i + 2} phone number must contain exactly 10 digits.` };
       }
     }
 
@@ -1250,7 +1276,7 @@ export async function startServer() {
             from,
             to: p.email,
             subject,
-            text: `ANVATION 2026 - Registration Confirmed\nHello ${p.name},\nTeam ID: ${team.id}\nRegistration No: ${team.regNumber}\nTeam Name: ${team.teamName}\nTrack: ${team.preferredTrack}\n${rawAccessPassword ? `Password: ${rawAccessPassword}\n` : ''}Payment UTR: ${team.paymentUtr || 'SUBMITTED'}\nVenue: ${venue}\nDates: ${dates}`,
+            text: `ANVATION 2026 - Registration Confirmed\nHello ${p.name},\nTeam ID: ${team.id}\nTeam Name: ${team.teamName}\nDomain: ${team.domain || team.preferredTrack}\n${rawAccessPassword ? `Password: ${rawAccessPassword}\n` : ''}Payment UTR: ${team.paymentUtr || 'SUBMITTED'}\nVenue: ${venue}\nDates: ${dates}`,
             html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
               <div style="background:#0b192c;color:#fff;padding:20px 24px;">
                 <h1 style="margin:0;font-size:20px;">ANVATION 2026</h1>
@@ -1260,7 +1286,7 @@ export async function startServer() {
                 <h2 style="color:#0f172a;margin-top:0;">Registration Confirmed ✓</h2>
                 <p>Dear <strong>${p.name}</strong>,</p>
                 <p>Congratulations! Your team's registration for <strong>ANVATION 2026</strong> has been confirmed.</p>
-                <p><strong>Team ID:</strong> ${team.id}<br/><strong>Reg No:</strong> ${team.regNumber}<br/><strong>Team Name:</strong> ${team.teamName}<br/><strong>Track:</strong> ${team.preferredTrack}${rawAccessPassword ? `<br/><strong>Password:</strong> ${rawAccessPassword}` : ''}<br/><strong>UTR:</strong> ${team.paymentUtr || 'SUBMITTED'}</p>
+                <p><strong>Team ID:</strong> ${team.id}<br/><strong>Team Name:</strong> ${team.teamName}<br/><strong>Domain:</strong> ${team.domain || team.preferredTrack}${rawAccessPassword ? `<br/><strong>Password:</strong> ${rawAccessPassword}` : ''}<br/><strong>UTR:</strong> ${team.paymentUtr || 'SUBMITTED'}</p>
                 ${gateQrDataUrl ? `<div style="text-align:center;margin:20px 0;"><img src="${gateQrDataUrl}" width="160" alt="Gate QR Pass"/><p style="font-size:12px;color:#64748b;">Gate Entry Pass QR</p></div>` : ''}
               </div>
             </div>`,
@@ -1313,8 +1339,8 @@ export async function startServer() {
       from: String(process.env.MAIL_FROM),
       to: team.leaderEmail,
       subject: `ANVATION 2026 portal password reset - ${team.id}`,
-      text: `A password reset was requested for your ANVATION 2026 team portal.\n\nTeam ID: ${team.id}\nRegistration No: ${team.regNumber}\n\nUse this link within 15 minutes to choose a new password:\n${resetUrl}\n\nIf you did not request this reset, contact the event administrators immediately.`,
-      html: `<p>A password reset was requested for your ANVATION 2026 team portal.</p><p><strong>Team ID:</strong> ${team.id}<br/><strong>Registration No:</strong> ${team.regNumber}</p><p><a href="${resetUrl}">Choose a new portal password</a></p><p>This link expires in 15 minutes. If you did not request this reset, contact the event administrators immediately.</p>`
+      text: `A password reset was requested for your ANVATION 2026 team portal.\n\nTeam ID: ${team.id}\n\nUse this link within 15 minutes to choose a new password:\n${resetUrl}\n\nIf you did not request this reset, contact the event administrators immediately.`,
+      html: `<p>A password reset was requested for your ANVATION 2026 team portal.</p><p><strong>Team ID:</strong> ${team.id}</p><p><a href="${resetUrl}">Choose a new portal password</a></p><p>This link expires in 15 minutes. If you did not request this reset, contact the event administrators immediately.</p>`
     });
   }
 
@@ -1683,18 +1709,14 @@ export async function startServer() {
           id: `p-${teamIndex}-1`,
           fullName: sanitizeInputString(leader.fullName),
           college: sanitizeInputString(leader.college || ''),
-          department: sanitizeInputString(leader.department || ''),
-          semester: sanitizeInputString(leader.semester || ''),
+          semester: '',
           email: sanitizeInputString(leader.email.trim().toLowerCase()),
           phone: sanitizeInputString(leader.phone || ''),
           usn: sanitizeInputString(leader.usn.trim().toUpperCase()),
-          gender: sanitizeInputString(leader.gender || ''),
-          githubUrl: sanitizeInputString(leader.githubUrl),
-          linkedinUrl: sanitizeInputString(leader.linkedinUrl),
+          state: sanitizeInputString(leader.state),
           role: 'Leader',
           teamId,
           accommodationRequired: !!leader.accommodationRequired,
-          emergencyContact: sanitizeInputString(leader.emergencyContact || ''),
           checkedIn: false,
           foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
         };
@@ -1703,18 +1725,14 @@ export async function startServer() {
           id: `p-${teamIndex}-${idx + 2}`,
           fullName: sanitizeInputString(m.fullName),
           college: sanitizeInputString(m.college || ''),
-          department: sanitizeInputString(m.department || ''),
-          semester: sanitizeInputString(m.semester || ''),
+          semester: '',
           email: sanitizeInputString(m.email.trim().toLowerCase()),
           phone: sanitizeInputString(m.phone || ''),
           usn: sanitizeInputString(m.usn.trim().toUpperCase()),
-          gender: sanitizeInputString(m.gender || ''),
-          githubUrl: sanitizeInputString(m.githubUrl),
-          linkedinUrl: sanitizeInputString(m.linkedinUrl),
+          state: sanitizeInputString(m.state),
           role: 'Member',
           teamId,
           accommodationRequired: !!m.accommodationRequired,
-          emergencyContact: sanitizeInputString(m.emergencyContact || ''),
           checkedIn: false,
           foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
         }));
@@ -1979,7 +1997,7 @@ export async function startServer() {
   // downloadable .eml fallback. Includes the Gate Entry Pass QR in the body.
   app.post("/api/send-registration-email", async (req, res) => {
     try {
-      const { teamId, email, emails, teamName, track, password, regNumber, participants } = req.body;
+      const { teamId, email, emails, teamName, domain, password, participants } = req.body;
       // participants: [{ email, name, college, role }] — used so the confirmation
       // mail always includes the College of every registered participant.
       const participantList: Array<{ email: string; name: string; college: string; role: string }> =
@@ -2010,9 +2028,8 @@ export async function startServer() {
       const dates = "October 8 - October 9, 2026 (24-Hour Hackathon)";
       const htmlR = `ANVATION 2026 - Registration Confirmed
 Team ID: ${teamId}
-Registration No: ${regNumber}
 Team Name: ${teamName}
-Track: ${track}
+Domain: ${domain}
 Portal Password: ${password}
 Venue: ${venue}
 Dates: ${dates}
@@ -2033,9 +2050,8 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
 <p>Congratulations! Your team's registration for <strong>ANVATION 2026</strong> has been confirmed.</p>
 <table style="width:100%;border-collapse:collapse;font-size:14px;">`;
       const htmlRows = `<tr><td style="padding:6px 0;color:#475569;">Team ID</td><td style="padding:6px 0;font-weight:bold;font-family:monospace;color:#0284c7;">${teamId}</td></tr>
-<tr><td style="padding:6px 0;color:#475569;">Registration No</td><td style="padding:6px 0;font-weight:bold;">${regNumber}</td></tr>
 <tr><td style="padding:6px 0;color:#475569;">Team Name</td><td style="padding:6px 0;font-weight:bold;">${teamName}</td></tr>
-<tr><td style="padding:6px 0;color:#475569;">Track</td><td style="padding:6px 0;font-weight:bold;">${track}</td></tr>
+<tr><td style="padding:6px 0;color:#475569;">Domain</td><td style="padding:6px 0;font-weight:bold;">${domain}</td></tr>
 <tr><td style="padding:6px 0;color:#475569;">Portal Password</td><td style="padding:6px 0;font-weight:bold;font-family:monospace;color:#7e22ce;">${password}</td></tr>
 <tr><td style="padding:6px 0;color:#475569;">Venue</td><td style="padding:6px 0;font-weight:bold;">${venue}</td></tr>
 <tr><td style="padding:6px 0;color:#475569;">Dates</td><td style="padding:6px 0;font-weight:bold;">${dates}</td></tr></table>
@@ -2143,6 +2159,19 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         }
       }
 
+      const otherTeams = teams.filter((team) => team.id !== existingTeam.id);
+      if (otherTeams.some((team) => normalizeTeamName(team.teamName) === normalizeTeamName(updatedTeam.teamName))) {
+        return res.status(409).json({ success: false, error: "That team name is already registered." });
+      }
+      const otherEmails = new Set(otherTeams.flatMap((team) => [team.leaderEmail, ...(team.members || []).map((member) => member.email)]).filter(Boolean).map((email) => String(email).trim().toLowerCase()));
+      const editedEmails = (updatedTeam.members || []).map((member) => String(member.email || '').trim().toLowerCase()).filter(Boolean);
+      if (editedEmails.some((email) => otherEmails.has(email) || !email.endsWith('@gmail.com')) || new Set(editedEmails).size !== editedEmails.length) {
+        return res.status(409).json({ success: false, error: "Every participant email must be a unique Gmail address." });
+      }
+      if ((updatedTeam.members || []).some((member) => !/^\d{10}$/.test(String(member.phone || '').replace(/[^0-9]/g, '')))) {
+        return res.status(400).json({ success: false, error: "Every participant phone number must contain exactly 10 digits." });
+      }
+
       teams[index] = updatedTeam;
       rebuildUniquenessIndexes();
       markDirty();
@@ -2162,7 +2191,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       const submittedMembers = Array.isArray(req.body?.members) ? req.body.members : [];
       const existingTeam = teams[index];
       const submittedById = new Map<string, Record<string, any>>(submittedMembers.map((member: any) => [String(member.id), member]));
-      const profileFields = ["college", "department", "semester", "gender", "githubUrl", "linkedinUrl", "accommodationRequired", "emergencyContact"];
+      const profileFields = ["college", "state", "accommodationRequired"];
       const updatedTeam: Team = {
         ...existingTeam,
         members: existingTeam.members.map((member) => {

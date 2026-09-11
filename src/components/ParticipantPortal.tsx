@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { SEED_TEAMS, HACKATHON_TRACKS } from '../data/mockData';
+import { SEED_TEAMS, HACKATHON_TRACKS, INDIA_STATES_AND_UTS } from '../data/mockData';
 import { Team, ProjectSubmission, Announcement, SupportTicket, MilestoneReport, Participant, Checkpoint } from '../types';
 import { generateCertificate } from '../utils/certificate';
 import { printDocument } from '../utils/pdfGenerator';
@@ -325,11 +325,10 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
       </div>
 
       <table>
-        <tr><th>Registration No</th><td>${currentTeam.regNumber}</td></tr>
         <tr><th>Auto-Assigned Team ID</th><td><strong style="color: #0284c7; font-family: monospace;">${currentTeam.id}</strong></td></tr>
         <tr><th>Portal Access Password</th><td><strong style="color: #7e22ce; font-family: monospace;">Stored securely; use the password from your registration confirmation.</strong></td></tr>
         <tr><th>Team Name</th><td><strong>${currentTeam.teamName}</strong></td></tr>
-        <tr><th>Preferred Track</th><td>${currentTeam.preferredTrack}</td></tr>
+        <tr><th>Domain</th><td>${currentTeam.domain || currentTeam.preferredTrack}</td></tr>
         <tr><th>Payment Status</th><td>${currentTeam.paymentStatus || 'Verified'} (UTR: ${currentTeam.paymentUtr || 'PhonePe Verified'})</td></tr>
         <tr><th>Member 1 (Leader)</th><td>${currentTeam.members[0]?.fullName} (${currentTeam.members[0]?.email})</td></tr>
         ${currentTeam.members.slice(1).map((m: any, idx: number) => `
@@ -404,7 +403,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
         // Refresh the live store so the dashboard reflects the latest team state.
         await fetchData();
       } else {
-        setLoginError(data.error || 'Invalid Team ID, Registration No, or Member Email. Please enter the credentials from your confirmation slip.');
+        setLoginError(data.error || 'Invalid Team ID or Member Email. Please enter the credentials from your confirmation slip.');
       }
     } catch (err) {
       console.error(err);
@@ -647,7 +646,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-1">
-                Domain Track: <span className="text-amber-300 font-semibold">{currentTeam.preferredTrack}</span> • Leader: <span className="text-cyan-300 font-mono">{currentTeam.leaderEmail}</span>
+                Domain: <span className="text-amber-300 font-semibold">{currentTeam.domain || currentTeam.preferredTrack}</span> • Leader: <span className="text-cyan-300 font-mono">{currentTeam.leaderEmail}</span>
               </p>
             </div>
           </div>
@@ -756,7 +755,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                 <h3 className="font-bold text-white text-base flex items-center gap-2">
                   <Users className="w-5 h-5 text-cyan-400" /> Team Members ({currentTeam?.members?.length ?? 0})
                 </h3>
-                <span className="text-xs text-cyan-300 font-mono">Reg # {currentTeam?.regNumber || 'ANV-2026'}</span>
+                <span className="text-xs text-cyan-300 font-mono">Team ID {currentTeam?.id}</span>
               </div>
 
               <div className="space-y-3">
@@ -769,7 +768,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                           {m.role}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5">{m.college} • {m.department}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{m.college} • {m.state || 'State not provided'}</p>
                       <p className="text-xs text-slate-400 font-mono">USN: {m.usn} • Email: {m.email}</p>
                     </div>
 
@@ -801,7 +800,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                   <div className="flex justify-between items-center"><span className="text-slate-400">Access Password:</span> <span className="text-emerald-300 font-mono font-bold">Stored securely</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Team:</span> <span className="text-white font-bold">{currentTeam.teamName}</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Leader Email:</span> <span className="text-slate-300 font-mono">{currentTeam.leaderEmail}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-400">Track:</span> <span className="text-purple-300 font-bold">{currentTeam.preferredTrack}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Domain:</span> <span className="text-purple-300 font-bold">{currentTeam.domain || currentTeam.preferredTrack}</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Payment UTR:</span> <span className="text-emerald-400 font-mono">{currentTeam.paymentUtr || 'PhonePe Verified'}</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Check-in Status:</span> <span className="text-amber-300">{currentTeam.status}</span></div>
                 </div>
@@ -1353,7 +1352,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                   </div>
 
                   <div className="sm:col-span-2">
-                    <label className="block text-xs font-bold text-slate-300 mb-1">Preferred Track Domain:</label>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Domain:</label>
                     <select
                       value={editingSlipData.preferredTrack}
                       onChange={(e) => setEditingSlipData({ ...editingSlipData, preferredTrack: e.target.value })}
@@ -1381,15 +1380,13 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                           id: `p-${Date.now()}-${editingSlipData.members.length + 1}`,
                           fullName: `Member ${editingSlipData.members.length + 1}`,
                           college: editingSlipData.members[0]?.college || 'KSSEM',
-                          department: 'CSE',
-                          semester: '6th Semester',
+                          state: editingSlipData.members[0]?.state || '',
                           email: '',
                           phone: '',
                           usn: '',
                           role: 'Member',
                           teamId: editingSlipData.id,
                           accommodationRequired: false,
-                          emergencyContact: '',
                           checkedIn: false
                         };
                         setEditingSlipData({
@@ -1478,11 +1475,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 border-t border-slate-800 pt-3">
                         {([
                           ['college', 'College / Institute'],
-                          ['department', 'Department'],
-                          ['semester', 'Semester'],
-                          ['githubUrl', 'GitHub URL'],
-                          ['linkedinUrl', 'LinkedIn URL'],
-                          ['emergencyContact', 'Emergency Contact']
+                          ['state', 'State / Union Territory']
                         ] as const).map(([field, label]) => (
                           <div key={field}>
                             <label className="block text-[10px] text-slate-400 mb-0.5">{label}:</label>
@@ -1498,18 +1491,16 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                             />
                           </div>
                         ))}
-                        <label className="flex items-center gap-2 text-[10px] text-slate-300 sm:col-span-2">
-                          <input
-                            type="checkbox"
-                            checked={!!mem.accommodationRequired}
-                            onChange={(e) => {
-                              const updated = [...editingSlipData.members];
-                              updated[idx] = { ...updated[idx], accommodationRequired: e.target.checked };
-                              setEditingSlipData({ ...editingSlipData, members: updated });
-                            }}
-                          />
-                          Accommodation required
-                        </label>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Accommodation required:</label>
+                          <select value={mem.accommodationRequired ? 'yes' : 'no'} onChange={(e) => {
+                            const updated = [...editingSlipData.members];
+                            updated[idx] = { ...updated[idx], accommodationRequired: e.target.value === 'yes' };
+                            setEditingSlipData({ ...editingSlipData, members: updated });
+                          }} className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs">
+                            <option value="no">No</option><option value="yes">Yes</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                   ))}
