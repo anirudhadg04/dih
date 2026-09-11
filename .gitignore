@@ -11,3 +11,14 @@ backups/*
 !backups/participant-registration-backup.csv
 !backups/.gitkeep
 *.traineddata
+# Ignore all environment files
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+
+# But keep the template for teammates
+!.env.example
+!.env.sample   

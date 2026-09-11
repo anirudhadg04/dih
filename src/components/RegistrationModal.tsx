@@ -107,6 +107,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     usn: '',
     college: '',
     state: '',
+    gender: '',
     accommodationRequired: false,
   });
 
@@ -119,6 +120,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       usn: '',
       college: '',
       state: '',
+      gender: '',
       accommodationRequired: false,
     },
   ];
@@ -131,6 +133,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       usn: string;
       college: string;
       state: string;
+      gender: string;
       accommodationRequired: boolean;
     }>
   >(createDefaultMembers());
@@ -146,6 +149,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
           usn: '',
           college: '',
           state: '',
+          gender: '',
           accommodationRequired: false,
         },
       ]);
@@ -194,6 +198,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       usn: '',
       college: '',
       state: '',
+      gender: '',
       accommodationRequired: false,
     });
     setMembers(createDefaultMembers());
@@ -289,6 +294,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       leader.phone.trim() &&
       leader.college.trim() &&
       leader.state.trim() &&
+      leader.gender.trim() &&
       /^[^\s@]+@gmail\.com$/i.test(leader.email.trim()) &&
       /^\d{10}$/.test(leader.phone.trim())
   );
@@ -304,6 +310,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
           m.phone.trim() &&
           m.college.trim() &&
           m.state.trim() &&
+          m.gender.trim() &&
           /^[^\s@]+@gmail\.com$/i.test(m.email.trim()) &&
           /^\d{10}$/.test(m.phone.trim())
       )
@@ -455,6 +462,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
             usn: leader.usn,
             college: leader.college,
             state: leader.state,
+            gender: leader.gender,
             accommodationRequired: leader.accommodationRequired,
           },
           members: members.map((member) => ({
@@ -464,6 +472,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
             usn: member.usn,
             college: member.college,
             state: member.state,
+            gender: member.gender,
             accommodationRequired: member.accommodationRequired,
           })),
           paymentUtr: finalUtr,
@@ -1193,72 +1202,42 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                           </button>
                         )}
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div className="order-1">
-                          <label className="block text-[10px] font-bold text-slate-400 mb-0.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 mb-1">
                             Full Name *
                           </label>
                           <input
                             type="text"
-                            placeholder="Full Name"
                             required
                             value={mem.fullName}
                             onChange={(e) => handleUpdateMember(idx, 'fullName', e.target.value)}
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                            placeholder="Akash M"
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
                           />
                         </div>
-                        <div className="order-5">
-                          <label className="block text-[10px] font-bold text-slate-400 mb-0.5">
-                            College Name *
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            placeholder="College / Institute"
-                            value={mem.college}
-                            onChange={(e) => handleUpdateMember(idx, 'college', e.target.value)}
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
-                          />
-                        </div>
-                        <div className="order-2">
-  <label className="block text-[10px] font-bold text-slate-400 mb-0.5">
-    State / Union Territory *
-  </label>
-  <select
-    required
-    value={mem.state}
-    onChange={(e) => handleUpdateMember(idx, 'state', e.target.value)}
-    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
-  >
-    <option value="">Select State</option>
-    {INDIA_STATES_AND_UTS.map((state) => (
-      <option key={state} value={state}>
-        {state}
-      </option>
-    ))}
-  </select>
-</div>
-<div className="order-4">
-  <label className="block text-[10px] font-bold text-slate-400 mb-0.5">
-    USN / Roll Number *
-  </label>
-  <input
-    type="text"
-    placeholder="USN Number"
-    required
-    value={mem.usn}
-    onChange={(e) => handleUpdateMember(idx, 'usn', e.target.value)}
-    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
-  />
-  {duplicateFieldErrors[`members.${idx}.usn`] && (
-    <p className="mt-1 text-[10px] text-red-400">
-      {duplicateFieldErrors[`members.${idx}.usn`]}
-    </p>
-  )}
-</div>
 
-                        <div className="order-3">
-                          <label className="block text-[10px] font-bold text-slate-400 mb-0.5">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 mb-1">
+                            State / Union Territory *
+                          </label>
+                          <select
+                            required
+                            value={mem.state}
+                            onChange={(e) => handleUpdateMember(idx, 'state', e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                          >
+                            <option value="">Select State</option>
+                            {INDIA_STATES_AND_UTS.map((state) => (
+                              <option key={state} value={state}>
+                                {state}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 mb-1">
                             Email Address *
                           </label>
                           <input
@@ -1266,19 +1245,52 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                             required
                             value={mem.email}
                             onChange={(e) => handleUpdateMember(idx, 'email', e.target.value)}
-                            placeholder="name@gmail.com"
+                            placeholder="akash@gmail.com"
                             pattern="[^\s@]+@gmail\.com"
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
                           />
                           {duplicateFieldErrors[`members.${idx}.email`] && (
-                            <p className="mt-1 text-[10px] text-red-400">
+                            <p className="mt-1 text-xs text-red-400">
                               {duplicateFieldErrors[`members.${idx}.email`]}
                             </p>
                           )}
                         </div>
 
-                        <div className="order-6">
-                          <label className="block text-[10px] font-bold text-slate-400 mb-0.5">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 mb-1">
+                            USN / Roll Number *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={mem.usn}
+                            onChange={(e) => handleUpdateMember(idx, 'usn', e.target.value)}
+                            placeholder="1KG23CS012"
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                          />
+                          {duplicateFieldErrors[`members.${idx}.usn`] && (
+                            <p className="mt-1 text-xs text-red-400">
+                              {duplicateFieldErrors[`members.${idx}.usn`]}
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 mb-1">
+                            College Name *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={mem.college}
+                            onChange={(e) => handleUpdateMember(idx, 'college', e.target.value)}
+                            placeholder="College / Institute"
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 mb-1">
                             Phone Number *
                           </label>
                           <input
@@ -1289,16 +1301,35 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                             placeholder="9876543210"
                             maxLength={10}
                             pattern="[0-9]{10}"
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
                           />
                           {duplicateFieldErrors[`members.${idx}.phone`] && (
-                            <p className="mt-1 text-[10px] text-red-400">
+                            <p className="mt-1 text-xs text-red-400">
                               {duplicateFieldErrors[`members.${idx}.phone`]}
                             </p>
                           )}
                         </div>
-                        <div className="order-7">
-                          <label className="block text-[10px] font-bold text-slate-400 mb-0.5">
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 mb-1">
+                            Gender
+                          </label>
+                          <select
+                            required
+                            value={mem.gender || ''}
+                            onChange={(e) => handleUpdateMember(idx, 'gender', e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                          >
+                            <option value="">Select Gender</option>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Other">Other</option>
+                            <option value="Prefer not to say">Prefer not to say</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-300 mb-1">
                             Accommodation required
                           </label>
                           <select
@@ -1310,7 +1341,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                                 e.target.value === 'yes'
                               )
                             }
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
                           >
                             <option value="no">No</option>
                             <option value="yes">Yes</option>

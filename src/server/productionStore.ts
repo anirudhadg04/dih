@@ -92,3 +92,26 @@ export async function saveProductionTeam(team: Team): Promise<void> {
   }
   await sql.transaction(statements);
 }
+
+export async function updateProductionTeam(team: Team): Promise<void> {
+  if (!sql) throw new Error('DATABASE_URL is required for production registration storage.');
+  await ensureProductionSchema();
+  const teamJson = JSON.stringify(team);
+  const teamNameKey = team.teamName.trim().replace(/\s+/g, ' ').toLowerCase();
+  await sql.transaction([
+    sql`
+      UPDATE registrations
+      SET team_name = ${team.teamName},
+          team_name_key = ${teamNameKey},
+          leader_email = ${team.leaderEmail},
+          preferred_track = ${team.preferredTrack},
+          team_json = ${teamJson}::jsonb
+      WHERE team_id = ${team.id}
+    `,
+    sql`DELETE FROM registration_participants WHERE team_id = ${team.id}`,
+    ...team.members.map((participant) => sql`
+      INSERT INTO registration_participants (participant_id, team_id, email, usn, phone, participant_json)
+      VALUES (${participant.id}, ${team.id}, ${participant.email.trim().toLowerCase()}, ${participant.usn.trim().toUpperCase()}, ${participant.phone.replace(/[^0-9]/g, '')}, ${JSON.stringify(participant)}::jsonb)
+    `)
+  ]);
+}

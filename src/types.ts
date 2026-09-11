@@ -9,6 +9,7 @@ export interface Participant {
   phone: string;
   usn: string;
   role: 'Leader' | 'Member';
+  gender?: 'Male' | 'Female' | 'Other' | 'Prefer not to say' | string;
   teamId: string;
   accommodationRequired: boolean;
   checkedIn: boolean;
@@ -28,17 +29,24 @@ export interface Team {
   teamName: string;
   leaderEmail: string;
   accessPassword?: string;
+  portalPasswordPlain?: string;
   domain?: string;
   preferredTrack: string;
   members: Participant[];
-  status: 'Registered' | 'Shortlisted' | 'Confirmed' | 'Checked-In' | 'Submitted' | 'Waitlist' | 'Disqualified';
+  status: 'Registered' | 'Shortlisted' | 'Confirmed' | 'Checked-In' | 'Submitted' | 'Waitlist' | 'Disqualified' | 'PENDING_PAYMENT_AUDIT' | 'APPROVED' | 'REJECTED';
   createdAt: string;
   projectSubmitted?: boolean;
   paymentUtr?: string;
-  paymentStatus?: 'Pending' | 'Verified' | 'Rejected';
+  paymentStatus?: 'Pending' | 'Verified' | 'Rejected' | 'PENDING_PAYMENT_AUDIT' | 'APPROVED' | 'REJECTED';
   paymentAmountDetail?: string;
   paymentScreenshot?: string | null;
   credentialDeliveryStatus?: 'queued' | 'accepted' | 'failed' | 'delivered';
+  approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  approvalTimestamp?: string;
+  approvalEmailStatus?: 'PENDING' | 'SENT' | 'FAILED';
+  approvalEmailSentAt?: string;
+  approvalReason?: string;
+  paymentAuditTimestamp?: string;
 }
 
 export interface ProjectSubmission {

@@ -18,7 +18,7 @@ import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 import { HACKATHON_TRACKS } from "./src/data/mockData";
 import { PAYMENT_UPI_ID, ocrContainsTransactionId } from "./src/utils/upiVerification";
-import { ensureProductionSchema, findProductionDuplicate, loadProductionTeams, productionStoreEnabled, saveProductionTeam } from "./src/server/productionStore";
+import { ensureProductionSchema, findProductionDuplicate, loadProductionTeams, productionStoreEnabled, saveProductionTeam, updateProductionTeam } from "./src/server/productionStore";
 
 const execFileAsync = promisify(execFile);
 
@@ -748,6 +748,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
     "usn",
     "college",
     "state",
+    "gender",
     "accommodation_required",
     "payment_utr",
     "payment_status",
@@ -791,6 +792,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
       member.usn,
       member.college,
       member.state,
+      member.gender || '',
       member.accommodationRequired,
       team.paymentUtr,
       team.paymentStatus,
@@ -855,6 +857,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
         valueFor(row, ["usn"]),
         valueFor(row, ["college"]),
         valueFor(row, ["state"]),
+        valueFor(row, ["gender"]),
         valueFor(row, ["accommodation_required"]),
         valueFor(row, ["payment_utr"]),
         valueFor(row, ["payment_status"]),
@@ -1457,6 +1460,27 @@ export async function startServer(options: { listen?: boolean } = {}) {
     });
   }
 
+  async function sendApprovalEmail(team: Team): Promise<void> {
+    const smtp = getSmtpConfig();
+    if (!smtp.configured) {
+      throw new Error("SMTP is not fully configured for approval delivery.");
+    }
+    const transporter = nodemailer.createTransport({
+      host: String(process.env.SMTP_HOST),
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === "true",
+      requireTLS: true,
+      auth: { user: String(process.env.SMTP_USER), pass: String(process.env.SMTP_PASS) }
+    });
+    const from = String(process.env.MAIL_FROM || process.env.SMTP_USER);
+    const recipients = team.members.map((m) => m.email);
+    const subject = `ANVATION 2026 Registration Approved — Team ${team.id}`;
+    const text = `Hello participants,\n\nYour team ${team.teamName} (${team.id}) has been approved by the admin.\n\nPlease keep checking your Gmail for updates.\n\nTeam details:\n${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}`;
+    const html = `<p>Hello participants,</p><p>Your team <b>${team.teamName}</b> (<b>${team.id}</b>) has been approved by the admin.</p><p>Please keep checking your Gmail for updates.</p><p>${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}</p>`;
+    await transporter.verify();
+    await Promise.all(recipients.map((recipient) => transporter.sendMail({ from, to: recipient, subject, text, html })));
+  }
+
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -1831,6 +1855,11 @@ export async function startServer(options: { listen?: boolean } = {}) {
         // 5. Generate secure team IDs and password
         const teamIndex = ++nextTeamNumber;
         const teamId = `AN-${String(teamIndex).padStart(3, '0')}`;
+        const genderAllowed = new Set(['Male', 'Female', 'Other', 'Prefer not to say']);
+        const leaderGender = typeof leader.gender === 'string' && genderAllowed.has(leader.gender) ? leader.gender : '';
+        if (!leaderGender) {
+          return { status: 400, body: { success: false, error: 'Lead participant gender is required.' } };
+        }
         const leaderParticipant: Participant = {
           id: `p-${teamIndex}-1`,
           fullName: sanitizeInputString(leader.fullName),
@@ -1839,6 +1868,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
           email: sanitizeInputString(leader.email.trim().toLowerCase()),
           phone: sanitizeInputString(leader.phone || ''),
           usn: sanitizeInputString(leader.usn.trim().toUpperCase()),
+          gender: leaderGender,
           role: 'Leader',
           teamId,
           accommodationRequired: !!leader.accommodationRequired,
@@ -1846,20 +1876,27 @@ export async function startServer(options: { listen?: boolean } = {}) {
           foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
         };
 
-        const formattedMembers: Participant[] = members.map((m: any, idx: number) => ({
-          id: `p-${teamIndex}-${idx + 2}`,
-          fullName: sanitizeInputString(m.fullName),
-          college: sanitizeInputString(m.college || ''),
-          state: sanitizeInputString(m.state || ''),
-          email: sanitizeInputString(m.email.trim().toLowerCase()),
-          phone: sanitizeInputString(m.phone || ''),
-          usn: sanitizeInputString(m.usn.trim().toUpperCase()),
-          role: 'Member',
-          teamId,
-          accommodationRequired: !!m.accommodationRequired,
-          checkedIn: false,
-          foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
-        }));
+        const formattedMembers: Participant[] = members.map((m: any, idx: number) => {
+          const memberGender = typeof m.gender === 'string' && genderAllowed.has(m.gender) ? m.gender : '';
+          if (!memberGender) {
+            throw new Error(`Member #${idx + 2} gender is required.`);
+          }
+          return {
+            id: `p-${teamIndex}-${idx + 2}`,
+            fullName: sanitizeInputString(m.fullName),
+            college: sanitizeInputString(m.college || ''),
+            state: sanitizeInputString(m.state || ''),
+            email: sanitizeInputString(m.email.trim().toLowerCase()),
+            phone: sanitizeInputString(m.phone || ''),
+            usn: sanitizeInputString(m.usn.trim().toUpperCase()),
+            gender: memberGender,
+            role: 'Member',
+            teamId,
+            accommodationRequired: !!m.accommodationRequired,
+            checkedIn: false,
+            foodCouponsClaimed: { lunch1: false, dinner1: false, midnightSnack: false, breakfast2: false, lunch2: false }
+          };
+        });
 
         const accessPassword = generatePortalPassword();
 
@@ -1871,14 +1908,18 @@ export async function startServer(options: { listen?: boolean } = {}) {
           domain: sanitizeInputString(selectedDomain),
           preferredTrack: sanitizeInputString(selectedDomain),
           members: [leaderParticipant, ...formattedMembers],
-          status: 'Confirmed',
+          status: 'PENDING_PAYMENT_AUDIT' as any,
           createdAt: new Date().toISOString(),
           projectSubmitted: false,
           paymentUtr: cleanUtr,
-          paymentStatus: 'Verified',
-          paymentAmountDetail: `Verified UTR; registration amount INR ${cmsConfig.registrationFee || 0} pending admin settlement`,
+          paymentStatus: 'PENDING_PAYMENT_AUDIT' as any,
+          paymentAmountDetail: `Pending admin payment audit for ${cmsConfig.registrationFee || 0} INR`,
           paymentScreenshot: paymentScreenshot || null,
-          credentialDeliveryStatus: 'queued'
+          credentialDeliveryStatus: 'queued',
+          approvalStatus: 'PENDING',
+          approvalTimestamp: '',
+          approvalEmailStatus: 'PENDING',
+          approvalEmailSentAt: ''
         };
 
         if (productionStoreEnabled) {
@@ -1929,11 +1970,6 @@ export async function startServer(options: { listen?: boolean } = {}) {
           console.error(`[BACKUP] Team ${newTeam.id} was registered, but CSV backup update failed:`, backupError);
         }
 
-        // Asynchronously deliver credentials to all participants without blocking the response
-        deliverCredentialsForTeam(newTeam, accessPassword).catch(deliveryErr => {
-          console.error(`[EMAIL DELIVERY ERROR] Team ${newTeam.id}:`, deliveryErr);
-        });
-
         const allTeamEmails = [
           { email: leader.email, name: leader.fullName, role: 'Leader' },
           ...members.filter((m: any) => m.email).map((m: any) => ({ email: m.email, name: m.fullName, role: 'Member' }))
@@ -1948,8 +1984,8 @@ export async function startServer(options: { listen?: boolean } = {}) {
         const responseBody = {
           success: true,
           team: registrationTeam,
-          accessPassword, // Return access password once upon registration
-          emailDispatched: true,
+          message: "Please wait for the admin's approval. Keep yourself updated by regularly checking your Gmail for further updates.",
+          emailDispatched: false,
           emailRecipients: allTeamEmails.map(e => e.email),
           stats: {
             registeredCount: totalParticipants,
@@ -3478,6 +3514,110 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Payment UTR Verification API
+  app.post("/api/admin/teams/:teamId/approve", requireAdmin, async (req, res) => {
+    try {
+      const { teamId } = req.params;
+      const team = teams.find((candidate) => candidate.id.toLowerCase() === teamId.toLowerCase());
+      if (!team) return res.status(404).json({ success: false, error: "Team not found" });
+      if (team.approvalStatus === 'APPROVED') {
+        return res.json({ success: true, team, alreadyApproved: true, message: 'Team already approved.' });
+      }
+      if (team.approvalStatus === 'REJECTED') {
+        return res.status(409).json({ success: false, error: 'This team has already been rejected and cannot be approved.' });
+      }
+
+      const previousApprovalStatus = team.approvalStatus || 'PENDING';
+      team.approvalStatus = 'APPROVED';
+      team.approvalTimestamp = new Date().toISOString();
+      team.status = 'Confirmed' as any;
+      team.paymentStatus = 'Verified' as any;
+      team.paymentAmountDetail = `Admin approved after payment audit; paid ${cmsConfig.registrationFee || 0} INR`;
+      team.approvalEmailStatus = 'PENDING';
+
+      if (productionStoreEnabled) {
+        try { await updateProductionTeam(team); } catch (storageErr) { console.error('[DATABASE] Production approval update failed:', storageErr); }
+      }
+      markDirty();
+
+      try {
+        await sendApprovalEmail(team);
+        team.approvalEmailStatus = 'SENT';
+        team.approvalEmailSentAt = new Date().toISOString();
+      } catch (emailErr: any) {
+        team.approvalEmailStatus = 'FAILED';
+        console.error('[EMAIL APPROVAL] Failed for team', team.id, emailErr?.message || emailErr);
+      }
+
+      if (productionStoreEnabled) {
+        try { await updateProductionTeam(team); } catch (storageErr) { console.error('[DATABASE] Production approval email state update failed:', storageErr); }
+      }
+      markDirty();
+
+      auditLogs.unshift({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actorEmail: req.session?.email || req.session?.username || 'unknown-admin',
+        actorRole: (req.session?.role || 'ADMIN') as AdminRole,
+        action: 'Team Approve',
+        target: `Team ${team.teamName} (${team.id})`,
+        beforeValue: previousApprovalStatus,
+        afterValue: 'APPROVED',
+        reason: 'Admin approved team after payment audit.',
+        ipAddress: req.ip || '127.0.0.1'
+      });
+
+      return res.json({ success: true, team, approved: true, approvalEmailStatus: team.approvalEmailStatus, message: 'Team approved successfully.' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message || 'Could not approve team.' });
+    }
+  });
+
+  app.post("/api/admin/teams/:teamId/reject", requireAdmin, async (req, res) => {
+    try {
+      const { teamId } = req.params;
+      const { reason } = req.body;
+      const team = teams.find((candidate) => candidate.id.toLowerCase() === teamId.toLowerCase());
+      if (!team) return res.status(404).json({ success: false, error: "Team not found" });
+      if (team.approvalStatus === 'REJECTED') {
+        return res.json({ success: true, team, alreadyRejected: true, message: 'Team already rejected.' });
+      }
+      if (team.approvalStatus === 'APPROVED') {
+        return res.status(409).json({ success: false, error: 'This team has already been approved and cannot be rejected.' });
+      }
+
+      const previousApprovalStatus = team.approvalStatus || 'PENDING';
+      team.approvalStatus = 'REJECTED';
+      team.approvalTimestamp = new Date().toISOString();
+      team.approvalReason = String(reason || 'Payment audit rejected by admin').trim();
+      team.status = 'Rejected' as any;
+      team.paymentStatus = 'Rejected' as any;
+      team.paymentAmountDetail = `Rejected by admin payment audit; ${team.approvalReason}`;
+      team.approvalEmailStatus = 'PENDING';
+
+      if (productionStoreEnabled) {
+        try { await updateProductionTeam(team); } catch (storageErr) { console.error('[DATABASE] Production rejection update failed:', storageErr); }
+      }
+      markDirty();
+
+      auditLogs.unshift({
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actorEmail: req.session?.email || req.session?.username || 'unknown-admin',
+        actorRole: (req.session?.role || 'ADMIN') as AdminRole,
+        action: 'Team Reject',
+        target: `Team ${team.teamName} (${team.id})`,
+        beforeValue: previousApprovalStatus,
+        afterValue: 'REJECTED',
+        reason: team.approvalReason,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+
+      return res.json({ success: true, team, rejected: true, message: 'Team rejected successfully.' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message || 'Could not reject team.' });
+    }
+  });
+
   app.post("/api/finance/verify-utr", requireAdmin, (req, res) => {
     const { teamId, paymentStatus } = req.body; // 'Verified' or 'Rejected'
     const team = teams.find(t => t.id === teamId);

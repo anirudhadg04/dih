@@ -1434,7 +1434,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                         )}
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <div>
                           <label className="block text-[10px] text-slate-400 mb-0.5">Full Name:</label>
                           <input
@@ -1444,6 +1444,38 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                             onChange={(e) => {
                               const updated = [...editingSlipData.members];
                               updated[idx] = { ...updated[idx], fullName: e.target.value };
+                              setEditingSlipData({ ...editingSlipData, members: updated });
+                            }}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">State / Union Territory:</label>
+                          <input
+                            type="text"
+                            required
+                            value={mem.state || ''}
+                            onChange={(e) => {
+                              const updated = [...editingSlipData.members];
+                              updated[idx] = { ...updated[idx], state: e.target.value };
+                              setEditingSlipData({ ...editingSlipData, members: updated });
+                            }}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Email:</label>
+                          <input
+                            type="email"
+                            required
+                            value={mem.email}
+                            onChange={(e) => {
+                              const updated = [...editingSlipData.members];
+                              updated[idx] = { ...updated[idx], email: e.target.value };
                               setEditingSlipData({ ...editingSlipData, members: updated });
                             }}
                             className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
@@ -1464,16 +1496,32 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                             className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-xs"
                           />
                         </div>
+                      </div>
 
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 border-t border-slate-800 pt-3">
                         <div>
-                          <label className="block text-[10px] text-slate-400 mb-0.5">Email:</label>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">College / Institute:</label>
                           <input
-                            type="email"
+                            type="text"
                             required
-                            value={mem.email}
+                            value={mem.college || ''}
                             onChange={(e) => {
                               const updated = [...editingSlipData.members];
-                              updated[idx] = { ...updated[idx], email: e.target.value };
+                              updated[idx] = { ...updated[idx], college: e.target.value };
+                              setEditingSlipData({ ...editingSlipData, members: updated });
+                            }}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Phone Number:</label>
+                          <input
+                            type="tel"
+                            value={mem.phone || ''}
+                            onChange={(e) => {
+                              const updated = [...editingSlipData.members];
+                              updated[idx] = { ...updated[idx], phone: e.target.value };
                               setEditingSlipData({ ...editingSlipData, members: updated });
                             }}
                             className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
@@ -1481,26 +1529,8 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 border-t border-slate-800 pt-3">
-                        {([
-                          ['college', 'College / Institute'],
-                          ['state', 'State / Union Territory']
-                        ] as const).map(([field, label]) => (
-                          <div key={field}>
-                            <label className="block text-[10px] text-slate-400 mb-0.5">{label}:</label>
-                            <input
-                              type="text"
-                              value={mem[field] || ''}
-                              onChange={(e) => {
-                                const updated = [...editingSlipData.members];
-                                updated[idx] = { ...updated[idx], [field]: e.target.value };
-                                setEditingSlipData({ ...editingSlipData, members: updated });
-                              }}
-                              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-xs"
-                            />
-                          </div>
-                        ))}
-                        <label className="flex items-center gap-2 text-[10px] text-slate-300 sm:col-span-2">
+                      <div className="border-t border-slate-800 pt-3">
+                        <label className="flex items-center gap-2 text-[10px] text-slate-300">
                           <input
                             type="checkbox"
                             checked={!!mem.accommodationRequired}
