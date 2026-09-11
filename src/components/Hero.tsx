@@ -350,7 +350,7 @@ export const Hero: React.FC<HeroProps> = ({ liveStats }) => {
             <div className="p-4 h-[180px] w-full rounded-2xl bg-gradient-to-b from-slate-950/95 to-slate-950/90 backdrop-blur-xl border border-violet-500/35 shadow-[0_0_24px_rgba(168,85,247,0.18)]">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-[14px] font-black text-white tracking-wider uppercase">BENIFITS</span>
+                  <span className="font-mono text-[14px] font-black text-white tracking-wider uppercase">BENEFITS</span>
                 </div>
               </div>
 
