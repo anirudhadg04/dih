@@ -1364,14 +1364,6 @@ export const AdminPortal: React.FC = () => {
             >
               <FileText className="w-4 h-4 text-indigo-400" /> Rulebook & Policies
             </button>
-            <button
-              onClick={() => setActiveTab('schedule')}
-              className={`w-full px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2.5 transition-all ${
-                activeTab === 'schedule' ? 'bg-purple-600/10 text-purple-300 border border-purple-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <Calendar className="w-4 h-4 text-teal-400" /> Agenda Schedule
-            </button>
           </div>
 
           {/* GROUP 4: PROJECTS & JUDGING */}
@@ -2087,38 +2079,6 @@ export const AdminPortal: React.FC = () => {
                 desc="Main hero headline, countdown & CTA buttons at the very top."
                 on={(cmsConfig.homeSections || {}).hero !== false}
                 onToggle={() => handleToggleHomeSection('hero', 'Hero Banner')}
-              />
-
-              <HomeSectionToggle
-                icon={<ShieldCheck className="w-5 h-5 text-blue-400" />}
-                label="About The Event"
-                desc="Overview, college info and highlights."
-                on={(cmsConfig.homeSections || {}).about !== false}
-                onToggle={() => handleToggleHomeSection('about', 'About')}
-              />
-
-              <HomeSectionToggle
-                icon={<Layers className="w-5 h-5 text-purple-400" />}
-                label="Tracks / Themes"
-                desc="AI/ML, cyber, IoT & other hackathon tracks."
-                on={(cmsConfig.homeSections || {}).themes !== false}
-                onToggle={() => handleToggleHomeSection('themes', 'Tracks & Themes')}
-              />
-
-              <HomeSectionToggle
-                icon={<Calendar className="w-5 h-5 text-teal-400" />}
-                label="24H Live Schedule"
-                desc="The hour-by-hour hackathon agenda/timeline."
-                on={(cmsConfig.homeSections || {}).schedule !== false}
-                onToggle={() => handleToggleHomeSection('schedule', 'Schedule')}
-              />
-
-              <HomeSectionToggle
-                icon={<Award className="w-5 h-5 text-emerald-400" />}
-                label="Prizes & Awards"
-                desc="Prize pool and winner breakdown."
-                on={(cmsConfig.homeSections || {}).prizes !== false}
-                onToggle={() => handleToggleHomeSection('prizes', 'Prizes')}
               />
 
               <HomeSectionToggle

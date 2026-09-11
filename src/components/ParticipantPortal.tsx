@@ -1354,10 +1354,11 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                     <label className="block text-xs font-bold text-slate-300 mb-1">Payment UTR Ref:</label>
                     <input
                       type="text"
+                      readOnly
                       value={editingSlipData.paymentUtr || ''}
-                      onChange={(e) => setEditingSlipData({ ...editingSlipData, paymentUtr: e.target.value })}
                       placeholder="e.g. UPI-938217349182"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs focus:border-cyan-500 outline-none"
+                      aria-readonly="true"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs cursor-not-allowed outline-none"
                     />
                   </div>
 

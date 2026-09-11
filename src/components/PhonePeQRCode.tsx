@@ -129,14 +129,7 @@ export const PhonePeQRCode: React.FC<PhonePeQRCodeProps> = ({
         {/* Pay Button for Mobile Users */}
         {showPayButton && upiString && (
           <div className="pt-2 w-full space-y-1.5">
-            <a
-              href={upiString}
-              onClick={() => onPaymentInitiated?.()}
-              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95"
-            >
-              <span>Tap to Pay with UPI / PhonePe App</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            
             <p className="text-[10px] text-slate-500">
               On mobile: Tap button to open PhonePe / GPay directly. On PC: Scan QR above.
             </p>

@@ -1881,33 +1881,6 @@ export async function startServer(options: { listen?: boolean } = {}) {
           credentialDeliveryStatus: 'queued'
         };
 
-        // Write to append-only CSV backup before persisting to memory/disk
-        try {
-          if (!productionStoreEnabled) await appendParticipantRegistrationBackup(newTeam);
-        } catch (backupError) {
-          console.error("[BACKUP] Registration CSV write failed; registration was not accepted:", backupError);
-          return {
-            status: 503,
-            body: {
-              success: false,
-              error: "Registration backup is temporarily unavailable. Please retry in a moment; no registration has been recorded."
-            }
-          };
-        }
-
-        try {
-          if (!productionStoreEnabled) await syncParticipantBackupToGitHub(newTeam);
-        } catch (syncError) {
-          console.error("[BACKUP] GitHub CSV sync failed; registration was not accepted:", syncError);
-          return {
-            status: 503,
-            body: {
-              success: false,
-              error: "Registration backup could not be published. Please retry in a moment; no registration has been recorded."
-            }
-          };
-        }
-
         if (productionStoreEnabled) {
           try {
             await saveProductionTeam(newTeam);
@@ -1945,6 +1918,16 @@ export async function startServer(options: { listen?: boolean } = {}) {
         teams.push(newTeam);
         rebuildUniquenessIndexes();
         markDirty();
+
+        // Update the CSV backup only after the registration is committed to
+        // the authoritative store. In production, Neon remains authoritative;
+        // the CSV is a secondary audit/export backup.
+        try {
+          await appendParticipantRegistrationBackup(newTeam);
+          await syncParticipantBackupToGitHub(newTeam);
+        } catch (backupError) {
+          console.error(`[BACKUP] Team ${newTeam.id} was registered, but CSV backup update failed:`, backupError);
+        }
 
         // Asynchronously deliver credentials to all participants without blocking the response
         deliverCredentialsForTeam(newTeam, accessPassword).catch(deliveryErr => {
