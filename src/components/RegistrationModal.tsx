@@ -296,6 +296,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
   const isStep3Valid =
     isLeaderValid && areAllMembersFilled && !hasDuplicateEmail && !hasDuplicateUsn && !hasDuplicatePhone;
 
+  const leaderValidationIssues = [
+    !leader.fullName.trim() && 'Missing name',
+    (!leader.email.trim() || !/^[^\s@]+@gmail\.com$/i.test(leader.email.trim())) &&
+      'Invalid/non-Gmail email',
+    !leader.usn.trim() && 'Missing USN',
+    !/^\d{10}$/.test(leader.phone.trim()) && 'Invalid phone (must be exactly 10 digits)',
+    !leader.college.trim() && 'Missing college',
+    !leader.state.trim() && 'Missing state',
+    !leader.gender.trim() && 'Missing gender',
+  ].filter(Boolean) as string[];
+
   const checkRegistrationDuplicates = async (includeParticipants: boolean): Promise<boolean> => {
     setCheckingDuplicates(true);
     setDuplicateFieldErrors({});
@@ -902,6 +913,12 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                     id="reg-step2-back-btn"
                   >
                     Back
+                {!isLeaderValid && (
+                  <div className="text-[11px] text-red-400 font-semibold">
+                    <span className="block">Leader details incomplete:</span>
+                    <span className="block">{leaderValidationIssues.join(' · ')}</span>
+                  </div>
+                )}
                   </button>
                   <button
                     disabled={!isLeaderValid}
@@ -913,6 +930,12 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
+                {!isLeaderValid && (
+                  <div className="text-[11px] text-red-400 font-semibold">
+                    <span className="block">Leader details incomplete:</span>
+                    <span className="block">{leaderValidationIssues.join(' · ')}</span>
+                  </div>
+                )}
               </div>
             )}
 
