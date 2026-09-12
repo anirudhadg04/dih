@@ -11,7 +11,7 @@
       "status": "Active",
       "createdAt": "2026-08-01",
       "twoFactorEnabled": true,
-      "lastLogin": "2026-09-12T04:56:34.337Z"
+      "lastLogin": "2026-09-12T05:25:12.666Z"
     },
     {
       "id": "adm-2",
@@ -85,6 +85,30 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1789190716035",
+      "timestamp": "2026-09-12T05:25:16.035Z",
+      "actorEmail": "superadmin@kssem.edu.in",
+      "actorRole": "SUPER_ADMIN",
+      "action": "Payment Status Change: Rejected + credentials removed",
+      "target": "Team CodeNova (AN-020)",
+      "beforeValue": "PAYMENT_APPROVED",
+      "afterValue": "Rejected + Removed",
+      "reason": "Payment UTR rejected by finance admin. Team and participants removed from active directories.",
+      "ipAddress": "127.0.0.1"
+    },
+    {
+      "id": "log-1789190648824",
+      "timestamp": "2026-09-12T05:24:08.824Z",
+      "actorEmail": "superadmin@kssem.edu.in",
+      "actorRole": "SUPER_ADMIN",
+      "action": "Payment Status Change: Verified",
+      "target": "Team CodeNova (AN-020)",
+      "beforeValue": "129456640042",
+      "afterValue": "Verified",
+      "reason": "Finance audit verification by Super Admin",
+      "ipAddress": "127.0.0.1"
+    },
     {
       "id": "log-1789188998194",
       "timestamp": "2026-09-12T04:56:38.194Z",
@@ -686,5 +710,5 @@
       "ipAddress": "192.168.1.10"
     }
   ],
-  "nextTeamNumber": 19
+  "nextTeamNumber": 20
 }
