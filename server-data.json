@@ -1,25 +1,25 @@
 {
   "teams": [
     {
-      "id": "AN-016",
+      "id": "AN-017",
       "teamName": "CodeNova",
       "leaderEmail": "anirudhaworks365@gmail.com",
-      "accessPassword": "pbkdf2_sha256$f9a6ae628ddfd183147d4715e605ab09$e923116cc643ff990a50be0f2eb22d2055e78b86ce5659d2cc7c6aa15d8a82d5",
-      "portalPasswordPlain": "XcB6-3RC9-wR4V",
+      "accessPassword": "pbkdf2_sha256$6b9ebc6a135e957f0ddffcfc98a4c4a0$f5f5cef67d9bd09f658f7b05e96704ef091b7e3d3506d5c113addb82ad4f5423",
+      "portalPasswordPlain": "soF8-PSFX-5LN9",
       "domain": "Artificial Intelligence & Machine Learning",
       "preferredTrack": "Artificial Intelligence & Machine Learning",
       "members": [
         {
-          "id": "p-16-1",
+          "id": "p-17-1",
           "fullName": "Anirudha Gururaja",
           "college": "ks",
           "state": "Karnataka",
           "email": "anirudhaworks365@gmail.com",
           "phone": "8660162988",
-          "usn": "11111111111",
+          "usn": "12345",
           "gender": "Male",
           "role": "Leader",
-          "teamId": "AN-016",
+          "teamId": "AN-017",
           "accommodationRequired": true,
           "checkedIn": false,
           "foodCouponsClaimed": {
@@ -31,16 +31,16 @@
           }
         },
         {
-          "id": "p-16-2",
+          "id": "p-17-2",
           "fullName": "Anirudha Gururaja",
           "college": "ks",
           "state": "Karnataka",
           "email": "anirudha.gururaja@gmail.com",
-          "phone": "2222222222",
-          "usn": "122222222222222222",
-          "gender": "Female",
+          "phone": "1111111111",
+          "usn": "1111111111111",
+          "gender": "Male",
           "role": "Member",
-          "teamId": "AN-016",
+          "teamId": "AN-017",
           "accommodationRequired": true,
           "checkedIn": false,
           "foodCouponsClaimed": {
@@ -53,7 +53,7 @@
         }
       ],
       "status": "PENDING_PAYMENT_AUDIT",
-      "createdAt": "2026-09-12T04:37:24.127Z",
+      "createdAt": "2026-09-12T04:41:48.082Z",
       "projectSubmitted": false,
       "paymentUtr": "129456640042",
       "paymentStatus": "PENDING_PAYMENT_AUDIT",
@@ -77,7 +77,7 @@
       "status": "Active",
       "createdAt": "2026-08-01",
       "twoFactorEnabled": true,
-      "lastLogin": "2026-09-12T04:37:07.668Z"
+      "lastLogin": "2026-09-12T04:40:43.149Z"
     },
     {
       "id": "adm-2",
@@ -151,6 +151,18 @@
     }
   ],
   "auditLogs": [
+    {
+      "id": "log-1789188049782",
+      "timestamp": "2026-09-12T04:40:49.782Z",
+      "actorEmail": "superadmin@kssem.edu.in",
+      "actorRole": "SUPER_ADMIN",
+      "action": "Payment Status Change: Rejected + credentials removed",
+      "target": "Team CodeNova (AN-016)",
+      "beforeValue": "PENDING_PAYMENT_AUDIT",
+      "afterValue": "Rejected + Removed",
+      "reason": "Payment UTR rejected by finance admin. Team and participants removed from active directories.",
+      "ipAddress": "127.0.0.1"
+    },
     {
       "id": "log-1789182740511",
       "timestamp": "2026-09-12T03:12:20.511Z",
@@ -644,5 +656,5 @@
       "ipAddress": "192.168.1.10"
     }
   ],
-  "nextTeamNumber": 16
+  "nextTeamNumber": 17
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SEED_SUBMISSIONS, SEED_ANNOUNCEMENTS, HACKATHON_TRACKS } from '../data/mockData';
 import { 
   Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, 
@@ -262,11 +262,26 @@ export const AdminPortal: React.FC = () => {
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
 
+  const adminDataRefreshInFlight = useRef(false);
+
   useEffect(() => {
-    fetchAdminData();
+    void fetchAdminData();
+
+    const refreshTimer = window.setInterval(() => {
+      if (!adminDataRefreshInFlight.current) {
+        void fetchAdminData();
+      }
+    }, 5000);
+
+    return () => {
+      window.clearInterval(refreshTimer);
+    };
   }, []);
 
   const fetchAdminData = async () => {
+    if (adminDataRefreshInFlight.current) return;
+    adminDataRefreshInFlight.current = true;
+
     try {
       const [tRes, sRes, aRes, tkRes, mRes, cmsRes, logRes, admRes, rbRes, emRes, jrRes, schRes, polRes, cpRes, spRes] = await Promise.all([
         fetch('/api/teams'),
@@ -319,6 +334,8 @@ export const AdminPortal: React.FC = () => {
       if (spData.sponsors) setSponsors(spData.sponsors);
     } catch (err) {
       console.error("Error loading Admin Data", err);
+    } finally {
+      adminDataRefreshInFlight.current = false;
     }
   };
 
