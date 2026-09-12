@@ -1441,21 +1441,56 @@ export async function startServer(options: { listen?: boolean } = {}) {
     if (!smtp.configured) {
       throw new Error("SMTP is not fully configured for approval delivery.");
     }
+
+    if (team.approvalEmailStatus === 'SENT') {
+      return;
+    }
+
+    const senderHost = String(process.env.SMTP_HOST || "").trim();
+    const senderPort = Number(process.env.SMTP_PORT) || 587;
+    const senderUser = String(process.env.SMTP_USER || "").trim();
+    const senderPass = String(process.env.SMTP_PASS || "").trim();
+    const from = String(process.env.MAIL_FROM || senderUser);
+
+    const recipients = Array.from(new Set(
+      team.members
+        .map((member) => String(member?.email || "").trim().toLowerCase())
+        .filter((email) => email && /^[^\s@]+@gmail\.com$/i.test(email))
+    ));
+
+    if (recipients.length === 0) {
+      throw new Error(`No valid Gmail participant email addresses found for team ${team.id}.`);
+    }
+
+    console.log(`[EMAIL APPROVAL] Team ${team.id} recipients: ${recipients.length}`);
+
     const transporter = nodemailer.createTransport({
-      host: String(process.env.SMTP_HOST),
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === "true",
+      host: senderHost,
+      port: senderPort,
+      secure: false,
       requireTLS: true,
-      auth: { user: String(process.env.SMTP_USER), pass: String(process.env.SMTP_PASS) }
+      ignoreTLS: false,
+      auth: { user: senderUser, pass: senderPass }
     });
-    const from = String(process.env.MAIL_FROM || process.env.SMTP_USER);
-    const recipients = team.members.map((m) => m.email);
+
+    try {
+      await transporter.verify();
+    } catch (verifyErr: any) {
+      console.error(`[EMAIL APPROVAL] SMTP verify failed for team ${team.id}: ${verifyErr?.message || String(verifyErr)}`);
+      throw verifyErr;
+    }
+
     const password = String(team.portalPasswordPlain || team.accessPassword || '');
     const subject = `ANVATION 2026 Registration Approved — Team ${team.id}`;
     const text = `Hello participants,\n\nYour team ${team.teamName} (${team.id}) has been approved by the admin.\n\nPayment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.\n\nPortal password: ${password}\n\nUse Team ID ${team.id} and this password to log in to the participant portal.\n\nTeam details:\n${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}`;
     const html = `<p>Hello participants,</p><p>Your team <b>${team.teamName}</b> (<b>${team.id}</b>) has been approved by the admin.</p><p><b>Payment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.</b></p><p><b>Portal password:</b> ${password}</p><p>Use Team ID <b>${team.id}</b> and this password to log in to the participant portal.</p><p>${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}</p>`;
-    await transporter.verify();
-    await Promise.all(recipients.map((recipient) => transporter.sendMail({ from, to: recipient, subject, text, html })));
+
+    try {
+      await Promise.all(recipients.map((recipient) => transporter.sendMail({ from, to: recipient, subject, text, html })));
+    } catch (mailErr: any) {
+      console.error(`[EMAIL APPROVAL] SMTP send failed for team ${team.id}: ${mailErr?.message || String(mailErr)}`);
+      throw mailErr;
+    }
   }
 
   // API Routes
