@@ -11,7 +11,6 @@ import nodemailer from "nodemailer";
 import QRCode from "qrcode";
 import sharp from "sharp";
 import compression from "compression";
-import rateLimit from "express-rate-limit";
 import { createWorker } from "tesseract.js";
 import { createServer as createViteServer } from "vite";
 import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
@@ -639,29 +638,6 @@ export async function startServer(options: { listen?: boolean } = {}) {
     }
     next();
   }
-
-  // Global per-IP API throttle — a sane ceiling so a single visitor (or a
-  // scripted bot burst) can never pin all the CPU. Each limiter below is
-  // created fresh once here using the live cmsConfig window.
-  const globalLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    limit: 300,
-    standardHeaders: false,
-    legacyHeaders: true,
-    message: { success: false, error: "Too many requests. Please slow down and try again in a minute." },
-  });
-  app.use("/api", globalLimiter);
-
-  // Stricter throttle for account-authentication + email-sending endpoints,
-  // which are the most common abuse / spambot targets.
-  const authLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    limit: 20,
-    standardHeaders: false,
-    legacyHeaders: true,
-    message: { success: false, error: "Too many attempts from this IP. Please wait a moment and retry." },
-  });
-  app.use(["/api/participant-login", "/api/participant/request-password-reset", "/api/participant/reset-password", "/api/send-registration-email", "/api/register", "/api/verify-payment", "/api/finance/verify-utr"], authLimiter);
 
   // In-Memory Data Store (Clean initialization)
   let teams: Team[] = [];
