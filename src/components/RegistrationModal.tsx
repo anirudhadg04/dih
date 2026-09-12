@@ -72,7 +72,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
   const [domain, setDomain] = useState(HACKATHON_TRACKS[0].title);
   const [paymentUtr, setPaymentUtr] = useState('');
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
-  const [registrationFee, setRegistrationFee] = useState(250);
+  const [registrationFee, setRegistrationFee] = useState(1);
 
   // Leader State (Member 1)
   const [leader, setLeader] = useState({
@@ -182,7 +182,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       fetch('/api/registration-status')
         .then((res) => res.json())
         .then((data) => {
-          setRegistrationFee(Number(data?.registrationFee) || 250);
+          setRegistrationFee(Number(data?.registrationFee) || 1);
           if (data && (data.freezeRegistrations || !data.registrationOpen)) {
             setIsFrozen(true);
           } else {
@@ -240,7 +240,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const currentFeePerParticipant = 250;
+  const currentFeePerParticipant = 1;
   const currentParticipantCount = 1 + members.length;
   const currentTotalFee = currentFeePerParticipant * currentParticipantCount;
 

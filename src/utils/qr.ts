@@ -79,7 +79,7 @@ export async function drawPhonePeQRCode(
   const {
     upiId = PAYMENT_UPI_ID,
     name = 'KSSEM Anvation 2026',
-    amount = '250',
+    amount = '1',
     size = 260,
     note = 'KSSEM Anvation 2026 Registration'
   } = options;

@@ -715,7 +715,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
     },
     maxTeamSize: 4,
     minTeamSize: 2,
-    registrationFee: 250,
+    registrationFee: 1,
     gateScanSecretKey: process.env.GATE_SCAN_SECRET_KEY || ""
   };
 
