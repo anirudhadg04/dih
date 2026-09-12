@@ -29,7 +29,8 @@ export interface Team {
   teamName: string;
   leaderEmail: string;
   accessPassword?: string;
-  portalPasswordPlain?: string;
+  /** AES-GCM encrypted copy used only to deliver an approved team's password. */
+  portalPasswordCiphertext?: string;
   domain?: string;
   preferredTrack: string;
   members: Participant[];

@@ -137,22 +137,27 @@ opens the registration and rulebook modals globally.
 
 ## Backend and data
 
-`server.ts` is the authoritative API. In local development it can use the JSON
-data file, but when `DATABASE_URL` is configured it loads and writes live
-registrations through the production Postgres store. All registration, team,
-participant, and payment mutations should go through the API rather than
-editing local files directly.
+`server.ts` is the authoritative API. Local development uses the existing
+JSON data file. On Vercel, the configured GitHub backup repository holds the
+canonical JSON registration ledger; Vercel's ephemeral filesystem is never
+used for live registrations. All registration, team, participant, and payment
+mutations go through the API rather than editing a ledger directly.
 
-For Vercel production, set `DATABASE_URL` to a Neon/Vercel Postgres connection. Registrations, participants, payment UTR/proof metadata, and global uniqueness constraints are stored in Postgres; Vercel's ephemeral filesystem is never used for live registrations. To migrate an existing local `server-data.json` once, set `DATABASE_URL` and run `npm run migrate:production` before deployment.
+For Vercel production, configure `GITHUB_BACKUP_REPOSITORY`,
+`GITHUB_BACKUP_TOKEN`, `SESSION_SECRET`, and
+`PORTAL_CREDENTIAL_ENCRYPTION_KEY`. The GitHub Contents API uses the file SHA
+as an optimistic-concurrency token, so team IDs and registrations remain
+unique across concurrent serverless invocations.
 
 The server also maintains locally:
 
 - A participant registration CSV backup under `backups/`.
 - Optional Git-backed CSV synchronization when explicitly enabled.
-- In-memory cookie sessions using the `anvation_session` cookie. Sessions last
-  12 hours and are lost when the server process restarts.
-- SMTP delivery for registration email. Without SMTP configuration, the server
-  generates a downloadable `.eml` file instead of sending email.
+- Local cookie sessions use in-memory state. On Vercel, signed 12-hour cookie
+  sessions use `SESSION_SECRET`, so authentication survives a function restart.
+- Approval and credential delivery use SMTP and the registered team member
+  addresses only. Vercel requires SMTP configuration; credentials are never
+  returned to the browser or written to logs.
 
 The server applies compression, security headers, API rate limits, request
 validation, same-origin checks for mutations, and role/team access checks. Put
@@ -170,7 +175,7 @@ The API is implemented in `server.ts`; the most useful route groups are:
 | Team operations         | `/api/teams`, `/api/checkin`, `/api/food-coupon/claim`, `/api/teams/:id/check-in`                                 |
 | Judging                 | `/api/submissions`, `/api/scorecards`, `/api/judging-rounds`, `/api/submissions/override-score`                   |
 | Content                 | `/api/announcements`, `/api/sponsors`, `/api/schedule`, `/api/rulebooks`, `/api/policies`, `/api/cms-config`      |
-| Event operations        | `/api/checkpoints`, `/api/room-allocations`, `/api/finance/verify-utr`, `/api/certificate-issue`                  |
+| Event operations        | `/api/checkpoints`, `/api/room-allocations`, `/api/admin/teams/:teamId/approve`, `/api/admin/teams/:teamId/reject`, `/api/certificate-issue` |
 | Administration          | `/api/admin-login`, `/api/admin-users`, `/api/audit-logs`, `/api/emergency-control`                               |
 
 Read endpoints are not all public. Always check the middleware attached to a

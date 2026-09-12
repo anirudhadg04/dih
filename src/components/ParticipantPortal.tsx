@@ -329,7 +329,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
         <tr><th>Portal Access Password</th><td><strong style="color: #7e22ce; font-family: monospace;">Stored securely; use the password from your registration confirmation.</strong></td></tr>
         <tr><th>Team Name</th><td><strong>${currentTeam.teamName}</strong></td></tr>
         <tr><th>Domain</th><td>${currentTeam.domain || currentTeam.preferredTrack}</td></tr>
-        <tr><th>Payment Status</th><td>${currentTeam.paymentStatus || 'Verified'} (UTR: ${currentTeam.paymentUtr || 'PhonePe Verified'})</td></tr>
+        <tr><th>Payment Status</th><td>${currentTeam.paymentStatus || 'Not available'} (UTR: ${currentTeam.paymentUtr || 'Not available'})</td></tr>
         <tr><th>Member 1 (Leader)</th><td>${currentTeam.members[0]?.fullName} (${currentTeam.members[0]?.email})</td></tr>
         ${currentTeam.members.slice(1).map((m: any, idx: number) => `
           <tr><th>Member ${idx + 2}</th><td>${m.fullName} (${m.usn || 'USN Provided'})</td></tr>
@@ -811,7 +811,7 @@ export const ParticipantPortal: React.FC<ParticipantPortalProps> = ({ onOpenRule
                   <div className="flex justify-between"><span className="text-slate-400">Team:</span> <span className="text-white font-bold">{currentTeam.teamName}</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Leader Email:</span> <span className="text-slate-300 font-mono">{currentTeam.leaderEmail}</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Domain:</span> <span className="text-purple-300 font-bold">{currentTeam.domain || currentTeam.preferredTrack}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-400">Payment UTR:</span> <span className="text-emerald-400 font-mono">{currentTeam.paymentUtr || 'PhonePe Verified'}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Payment UTR:</span> <span className="text-emerald-400 font-mono">{currentTeam.paymentUtr || 'Not available'}</span></div>
                   <div className="flex justify-between"><span className="text-slate-400">Check-in Status:</span> <span className="text-amber-300">{currentTeam.status}</span></div>
                 </div>
 

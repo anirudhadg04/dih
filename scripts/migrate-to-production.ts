@@ -4,7 +4,7 @@ import { productionStoreEnabled, saveProductionTeam } from '../src/server/produc
 import type { Team } from '../src/types';
 
 if (!productionStoreEnabled) {
-  throw new Error('Set DATABASE_URL before running the production migration.');
+  throw new Error('Set GITHUB_BACKUP_REPOSITORY and GITHUB_BACKUP_TOKEN before running the production migration.');
 }
 
 const dataDirectory = path.resolve((process.env.DATA_DIR || process.cwd()).trim());

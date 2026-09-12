@@ -17,7 +17,7 @@ import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 import { HACKATHON_TRACKS } from "./src/data/mockData";
 import { PAYMENT_UPI_ID, ocrContainsTransactionId } from "./src/utils/upiVerification";
-import { ensureProductionSchema, findProductionDuplicate, loadProductionTeams, productionStoreEnabled, saveProductionTeam, updateProductionTeam, deleteProductionTeam } from "./src/server/productionStore";
+import { ensureProductionSchema, findProductionDuplicate, getProductionNextTeamNumber, loadProductionTeams, productionStoreEnabled, saveProductionTeam, transitionProductionTeam, updateProductionTeam, deleteProductionTeam } from "./src/server/productionStore";
 
 const execFileAsync = promisify(execFile);
 
@@ -488,8 +488,12 @@ export async function startServer(options: { listen?: boolean } = {}) {
   const AUTH_COOKIE = "anvation_session";
   const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
   const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_BOOTSTRAP_PASSWORD || "change-me-in-dev-only";
+  const sessionSecret = String(process.env.SESSION_SECRET || "").trim();
   if (process.env.VERCEL && !process.env.ADMIN_BOOTSTRAP_PASSWORD) {
     throw new Error("ADMIN_BOOTSTRAP_PASSWORD must be configured for Vercel production deployments.");
+  }
+  if (process.env.VERCEL && !sessionSecret) {
+    throw new Error("SESSION_SECRET must be configured for Vercel production deployments.");
   }
   const sessionStore = new Map<string, { user: { id: string; type: "admin" | "participant"; role?: string; email?: string; username?: string; name?: string; teamId?: string; expiresAt: number; }; expiresAt: number }>();
   const passwordResetTokens = new Map<string, { teamId: string; expiresAt: number }>();
@@ -503,7 +507,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
 
   function sanitizeTeamForClient(team: any) {
     if (!team) return team;
-    const { accessPassword: _accessPassword, portalPasswordPlain: _portalPasswordPlain, ...rest } = team;
+    const { accessPassword: _accessPassword, portalPasswordPlain: _portalPasswordPlain, portalPasswordCiphertext: _portalPasswordCiphertext, ...rest } = team;
     return rest;
   }
 
@@ -528,6 +532,36 @@ export async function startServer(options: { listen?: boolean } = {}) {
     return groups.join("-");
   }
 
+  const portalCredentialKey = String(process.env.PORTAL_CREDENTIAL_ENCRYPTION_KEY || "").trim();
+  if (process.env.VERCEL && !portalCredentialKey) {
+    throw new Error("PORTAL_CREDENTIAL_ENCRYPTION_KEY must be configured for Vercel production deployments.");
+  }
+
+  function getPortalCredentialKey(): Buffer {
+    // A local fallback keeps existing development data usable. Production must
+    // always provide a separate secret above and never derives one from a
+    // developer-facing default password.
+    const source = portalCredentialKey || `local-development-only:${DEFAULT_ADMIN_PASSWORD}`;
+    return crypto.createHash("sha256").update(source).digest();
+  }
+
+  function encryptPortalPassword(password: string): string {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", getPortalCredentialKey(), iv);
+    const ciphertext = Buffer.concat([cipher.update(password, "utf8"), cipher.final()]);
+    return `v1.${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${ciphertext.toString("base64url")}`;
+  }
+
+  function decryptPortalPassword(ciphertext?: string): string {
+    const [version, ivText, tagText, payloadText] = String(ciphertext || "").split(".");
+    if (version !== "v1" || !ivText || !tagText || !payloadText) {
+      throw new Error("The approved portal password is unavailable. Reissue it from Participant Control.");
+    }
+    const decipher = crypto.createDecipheriv("aes-256-gcm", getPortalCredentialKey(), Buffer.from(ivText, "base64url"));
+    decipher.setAuthTag(Buffer.from(tagText, "base64url"));
+    return Buffer.concat([decipher.update(Buffer.from(payloadText, "base64url")), decipher.final()]).toString("utf8");
+  }
+
   function generatePasswordResetToken(): { rawToken: string; tokenHash: string } {
     const rawToken = crypto.randomBytes(32).toString("base64url");
     const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
@@ -548,8 +582,13 @@ export async function startServer(options: { listen?: boolean } = {}) {
   }
 
   function createSession(user: any) {
-    const sid = crypto.randomBytes(24).toString("hex");
     const record = { user: { ...user, expiresAt: Date.now() + SESSION_TTL_MS }, expiresAt: Date.now() + SESSION_TTL_MS };
+    if (process.env.VERCEL) {
+      const payload = Buffer.from(JSON.stringify(record.user), "utf8").toString("base64url");
+      const signature = crypto.createHmac("sha256", sessionSecret).update(payload).digest("base64url");
+      return `v1.${payload}.${signature}`;
+    }
+    const sid = crypto.randomBytes(24).toString("hex");
     sessionStore.set(sid, record);
     return sid;
   }
@@ -559,6 +598,21 @@ export async function startServer(options: { listen?: boolean } = {}) {
     const match = cookieRaw.split(";").map((v: string) => v.trim()).find((v: string) => v.startsWith(`${AUTH_COOKIE}=`));
     const sid = match ? decodeURIComponent(match.slice(AUTH_COOKIE.length + 1)) : null;
     if (!sid) return null;
+    if (process.env.VERCEL) {
+      const [version, payload, signature] = sid.split(".");
+      if (version !== "v1" || !payload || !signature) return null;
+      const expected = crypto.createHmac("sha256", sessionSecret).update(payload).digest("base64url");
+      const receivedBuffer = Buffer.from(signature);
+      const expectedBuffer = Buffer.from(expected);
+      if (receivedBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(receivedBuffer, expectedBuffer)) return null;
+      try {
+        const user = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+        if (!user || !["admin", "participant"].includes(user.type) || !Number.isFinite(user.expiresAt) || Date.now() > user.expiresAt) return null;
+        return { user, expiresAt: user.expiresAt };
+      } catch {
+        return null;
+      }
+    }
     const session = sessionStore.get(sid);
     if (!session) return null;
     if (Date.now() > session.expiresAt) {
@@ -610,17 +664,30 @@ export async function startServer(options: { listen?: boolean } = {}) {
   const requireAdmin = requireRole(["ADMIN", "REGISTRATION_MANAGER", "CONTENT_MANAGER", "SUPER_ADMIN", "JUDGE", "CHECKIN_STAFF"]);
   const requireSuperAdmin = requireRole(["SUPER_ADMIN"]);
 
-  function requireTeamAccess(req: any, res: any, next: any) {
+  async function requireTeamAccess(req: any, res: any, next: any) {
     const session = getSessionFromRequest(req);
     if (!session) return res.status(401).json({ success: false, error: "Authentication required." });
     const teamId = String(req.params?.teamId || req.body?.teamId || req.query?.teamId || "");
     const userTeamId = session.user.teamId || "";
     const isAdminRole = ["ADMIN", "REGISTRATION_MANAGER", "CONTENT_MANAGER", "SUPER_ADMIN", "JUDGE", "CHECKIN_STAFF"].includes(String(session.user.role || "").toUpperCase());
-    if (!teamId && !isAdminRole) {
+    const requestedTeamId = teamId || userTeamId;
+    if (!requestedTeamId && !isAdminRole) {
       return res.status(400).json({ success: false, error: "Team ID is required." });
     }
-    if (teamId && userTeamId && teamId.toLowerCase() !== userTeamId.toLowerCase() && !isAdminRole) {
+    if (requestedTeamId && userTeamId && requestedTeamId.toLowerCase() !== userTeamId.toLowerCase() && !isAdminRole) {
       return res.status(403).json({ success: false, error: "Forbidden: team access denied." });
+    }
+    if (!isAdminRole) {
+      try {
+        await refreshProductionTeams();
+      } catch {
+        return res.status(503).json({ success: false, error: "Registration data is temporarily unavailable." });
+      }
+      const team = teams.find((candidate) => candidate.id.toLowerCase() === userTeamId.toLowerCase());
+      if (!team || team.approvalStatus !== 'APPROVED') {
+        clearAuthCookie(res);
+        return res.status(403).json({ success: false, error: "Participant portal access requires an approved registration." });
+      }
     }
     req.session = session.user;
     next();
@@ -983,6 +1050,13 @@ export async function startServer(options: { listen?: boolean } = {}) {
     }
   }
 
+  async function refreshProductionTeams(): Promise<void> {
+    if (!productionStoreEnabled) return;
+    teams = await loadProductionTeams();
+    nextTeamNumber = Math.max(nextTeamNumber, await getProductionNextTeamNumber());
+    rebuildUniquenessIndexes();
+  }
+
   // Idempotency cache for registration requests (5 min TTL)
   const idempotencyStore = new Map<string, { status: number; body: any; expiresAt: number }>();
   setInterval(() => {
@@ -1321,99 +1395,25 @@ export async function startServer(options: { listen?: boolean } = {}) {
     failedCount: number;
     results: Array<{ recipient: string; status: string; error?: string }>;
   }> {
-    const participantList = (team.members || []).map((m) => ({
-      email: m.email,
-      name: m.fullName,
-      college: m.college || "KSSEM",
-      role: m.role || "Member"
-    }));
-
-    const subject = `🎉 Registration Confirmed: ANVATION 2026 [Team ID: ${team.id}]`;
-    const dates = "October 8 - October 9, 2026 (24-Hour Hackathon)";
-    const venue = "K.S. School of Engineering and Management (KSSEM), Kanakapura Road, Bengaluru - 560109";
-
-    let gateQrBuffer: Buffer | null = null;
-    let gateQrDataUrl = "";
-    try {
-      gateQrDataUrl = await QRCode.toDataURL(
-        `https://anvation.live/checkin?teamId=${team.id}`,
-        { width: 200, margin: 2 }
-      );
-      gateQrBuffer = Buffer.from(gateQrDataUrl.split(",")[1], "base64");
-    } catch (qrErr) {
-      console.warn(`[QR ERROR] Could not generate QR code for team ${team.id}:`, qrErr);
+    if (team.approvalStatus !== 'APPROVED') {
+      throw new Error('Credentials can only be delivered after admin approval.');
     }
-
-    const recipientResults: Array<{ recipient: string; status: string; error?: string }> = [];
-    let deliveredCount = 0;
-    let failedCount = 0;
-
-    const smtp = getSmtpConfig();
-    const smtpHost = process.env.SMTP_HOST;
-    if (smtp.configured && smtpHost) {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: process.env.SMTP_SECURE === "true",
-        auth: {
-          user: process.env.SMTP_USER || "",
-          pass: process.env.SMTP_PASS || ""
-        }
-      });
-      const from = String(process.env.MAIL_FROM);
-
-      for (const p of participantList) {
-        try {
-          const info = await transporter.sendMail({
-            from,
-            to: p.email,
-            subject,
-            text: `ANVATION 2026 - Registration Confirmed\nHello ${p.name},\nTeam ID: ${team.id}\nTeam Name: ${team.teamName}\nDomain: ${team.domain || team.preferredTrack}\n${rawAccessPassword ? `Password: ${rawAccessPassword}\n` : ''}Payment UTR: ${team.paymentUtr || 'SUBMITTED'}\nVenue: ${venue}\nDates: ${dates}`,
-            html: `<div style="font-family:sans-serif;max-width:600px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
-              <div style="background:#0b192c;color:#fff;padding:20px 24px;">
-                <h1 style="margin:0;font-size:20px;">ANVATION 2026</h1>
-                <p style="margin:4px 0 0;font-size:12px;color:#67e8f9;">NATIONAL LEVEL 24-HOUR HACKATHON</p>
-              </div>
-              <div style="padding:24px;">
-                <h2 style="color:#0f172a;margin-top:0;">Registration Confirmed ✓</h2>
-                <p>Dear <strong>${p.name}</strong>,</p>
-                <p>Congratulations! Your team's registration for <strong>ANVATION 2026</strong> has been confirmed.</p>
-                <p><strong>Team ID:</strong> ${team.id}<br/><strong>Team Name:</strong> ${team.teamName}<br/><strong>Domain:</strong> ${team.domain || team.preferredTrack}${rawAccessPassword ? `<br/><strong>Password:</strong> ${rawAccessPassword}` : ''}<br/><strong>UTR:</strong> ${team.paymentUtr || 'SUBMITTED'}</p>
-                ${gateQrDataUrl ? `<div style="text-align:center;margin:20px 0;"><img src="${gateQrDataUrl}" width="160" alt="Gate QR Pass"/><p style="font-size:12px;color:#64748b;">Gate Entry Pass QR</p></div>` : ''}
-              </div>
-            </div>`,
-            attachments: gateQrBuffer
-              ? [{
-                  filename: `gate-pass-${team.id}.png`,
-                  content: gateQrBuffer,
-                  cid: "gate-pass-qr",
-                  contentType: "image/png"
-                }]
-              : undefined
-          });
-          deliveredCount++;
-          recipientResults.push({ recipient: p.email, status: "SENT" });
-          console.log(`[EMAIL SENT] To: ${p.email} | Team: ${team.id} | MsgId: ${info.messageId}`);
-        } catch (mailErr: any) {
-          failedCount++;
-          recipientResults.push({ recipient: p.email, status: "FAILED", error: String(mailErr.message || mailErr) });
-          console.error(`[EMAIL FAILED] To: ${p.email} | Team: ${team.id} | ${mailErr.message}`);
-        }
-      }
-
-      team.credentialDeliveryStatus = failedCount === 0 ? "delivered" : (deliveredCount > 0 ? "delivered" : "failed");
-      markDirty();
-      return { success: deliveredCount > 0, deliveredCount, failedCount, results: recipientResults };
-    } else {
-      for (const p of participantList) {
-        recipientResults.push({ recipient: p.email, status: "READY_LOCAL" });
-        deliveredCount++;
-      }
-      console.log(`[EMAIL LOG] SMTP not configured. Generated confirmation records for: ${participantList.map(p => p.email).join(", ")} | Team: ${team.id}`);
-      team.credentialDeliveryStatus = "delivered";
-      markDirty();
-      return { success: true, deliveredCount, failedCount: 0, results: recipientResults };
+    if (team.approvalEmailStatus === 'SENT') {
+      return { success: true, deliveredCount: 0, failedCount: 0, results: [] };
     }
+    const password = rawAccessPassword || decryptPortalPassword(team.portalPasswordCiphertext);
+    await sendApprovalEmail(team, password);
+    team.approvalEmailStatus = 'SENT';
+    team.approvalEmailSentAt = new Date().toISOString();
+    if (productionStoreEnabled) await updateProductionTeam(team);
+    markDirty();
+    return {
+      success: true,
+      deliveredCount: new Set(team.members.map((member) => member.email.trim().toLowerCase()).filter(Boolean)).size,
+      failedCount: 0,
+      results: []
+    };
+
   }
 
   async function sendPortalResetEmail(team: Team, resetUrl: string): Promise<void> {
@@ -1436,13 +1436,13 @@ export async function startServer(options: { listen?: boolean } = {}) {
     });
   }
 
-  async function sendApprovalEmail(team: Team): Promise<void> {
+  async function sendApprovalEmail(team: Team, password: string, delivery: 'approval' | 'password-reset' = 'approval'): Promise<void> {
     const smtp = getSmtpConfig();
     if (!smtp.configured) {
       throw new Error("SMTP is not fully configured for approval delivery.");
     }
 
-    if (team.approvalEmailStatus === 'SENT') {
+    if (delivery === 'approval' && team.approvalEmailStatus === 'SENT') {
       return;
     }
 
@@ -1455,14 +1455,12 @@ export async function startServer(options: { listen?: boolean } = {}) {
     const recipients = Array.from(new Set(
       team.members
         .map((member) => String(member?.email || "").trim().toLowerCase())
-        .filter((email) => email && /^[^\s@]+@gmail\.com$/i.test(email))
+        .filter((email) => email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     ));
 
     if (recipients.length === 0) {
-      throw new Error(`No valid Gmail participant email addresses found for team ${team.id}.`);
+      throw new Error(`No valid participant email addresses found for team ${team.id}.`);
     }
-
-    console.log(`[EMAIL APPROVAL] Team ${team.id} recipients: ${recipients.length}`);
 
     const transporter = nodemailer.createTransport({
       host: senderHost,
@@ -1480,13 +1478,29 @@ export async function startServer(options: { listen?: boolean } = {}) {
       throw verifyErr;
     }
 
-    const password = String(team.portalPasswordPlain || team.accessPassword || '');
-    const subject = `ANVATION 2026 Registration Approved — Team ${team.id}`;
-    const text = `Hello participants,\n\nYour team ${team.teamName} (${team.id}) has been approved by the admin.\n\nPayment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.\n\nPortal password: ${password}\n\nUse Team ID ${team.id} and this password to log in to the participant portal.\n\nTeam details:\n${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}`;
-    const html = `<p>Hello participants,</p><p>Your team <b>${team.teamName}</b> (<b>${team.id}</b>) has been approved by the admin.</p><p><b>Payment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.</b></p><p><b>Portal password:</b> ${password}</p><p>Use Team ID <b>${team.id}</b> and this password to log in to the participant portal.</p><p>${team.members.map((m) => `${m.fullName} (${m.role})`).join(", ")}</p>`;
+    const teamQr = await QRCode.toBuffer(team.id, { width: 220, margin: 1, errorCorrectionLevel: 'H' });
+    const resetting = delivery === 'password-reset';
+    const heading = resetting ? 'Portal Password Reset' : 'Registration Confirmed';
+    const confirmation = resetting
+      ? 'An administrator reset your portal password.'
+      : 'Registration has been approved.';
+    const approvalEmailBody = {
+      text: `${heading}\n\nTeam Name: ${team.teamName}\nTeam ID: ${team.id}\nUsername: ${team.leaderEmail || team.id}\nPortal Password: ${password}\n\n${confirmation}`,
+      html: `<p><strong>${heading}</strong></p><p><b>Team Name:</b> ${team.teamName}<br/><b>Team ID:</b> ${team.id}<br/><b>Username:</b> ${team.leaderEmail || team.id}<br/><b>Portal Password:</b> ${password}</p><p>${confirmation}</p><img src="cid:team-qr" width="220" height="220" alt="Team QR code" />`
+    };
+    const subject = resetting
+      ? `ANVATION 2026 Portal Password Reset — Team ${team.id}`
+      : `ANVATION 2026 Registration Approved — Team ${team.id}`;
 
     try {
-      await Promise.all(recipients.map((recipient) => transporter.sendMail({ from, to: recipient, subject, text, html })));
+      await Promise.all(recipients.map((recipient) => transporter.sendMail({
+        from,
+        to: recipient,
+        subject,
+        text: approvalEmailBody.text,
+        html: approvalEmailBody.html,
+        attachments: [{ filename: `team-${team.id}.png`, content: teamQr, cid: 'team-qr', contentType: 'image/png' }]
+      })));
     } catch (mailErr: any) {
       console.error(`[EMAIL APPROVAL] SMTP send failed for team ${team.id}: ${mailErr?.message || String(mailErr)}`);
       throw mailErr;
@@ -1553,14 +1567,29 @@ export async function startServer(options: { listen?: boolean } = {}) {
   });
 
   // Teams & Registrations
-  app.get("/api/teams", (req, res) => {
+  app.get("/api/teams", async (req, res) => {
+    try {
+      await refreshProductionTeams();
     // Calculate live real-time statistics
     const totalParticipants = teams.reduce((acc, t) => acc + t.members.length, 0);
     const uniqueColleges = new Set(teams.flatMap(t => t.members.map(m => m.college))).size;
     const totalCapacity = cmsConfig.maxRegistrations || 350;
     const seatsLeft = Math.max(0, totalCapacity - totalParticipants);
 
-    const safeTeams = teams.map((team) => sanitizeTeamForClient(team));
+    const session = getSessionFromRequest(req);
+    const isAdmin = session?.user?.type === 'admin';
+    const participantTeam = session?.user?.type === 'participant' && session.user.teamId
+      ? teams.find((team) => team.id === session.user!.teamId)
+      : undefined;
+    if (session?.user?.type === 'participant' && participantTeam?.approvalStatus !== 'APPROVED') {
+      clearAuthCookie(res);
+      return res.status(403).json({ success: false, error: 'Participant portal access requires an approved registration.' });
+    }
+    const safeTeams = isAdmin
+      ? teams.map((team) => sanitizeTeamForClient(team))
+      : participantTeam
+        ? [sanitizeTeamForClient(participantTeam)]
+        : [];
     res.json({
       success: true,
       teams: safeTeams,
@@ -1574,20 +1603,36 @@ export async function startServer(options: { listen?: boolean } = {}) {
         totalTeams: teams.length
       }
     });
+    } catch {
+      res.status(503).json({ success: false, error: 'Registration data is temporarily unavailable.' });
+    }
   });
 
   // Return only the current session identity so the client can gate the admin view.
   // Privileged API routes still enforce authorization independently with middleware.
-  app.get("/api/session", (req, res) => {
+  app.get("/api/session", async (req, res) => {
     const session = getSessionFromRequest(req);
     if (!session) return res.json({ authenticated: false });
+    if (session.user.type === 'participant') {
+      try {
+        await refreshProductionTeams();
+        const team = teams.find((candidate) => candidate.id === session.user.teamId);
+        if (!team || team.approvalStatus !== 'APPROVED') {
+          clearAuthCookie(res);
+          return res.json({ authenticated: false });
+        }
+      } catch {
+        return res.status(503).json({ authenticated: false, error: 'Registration data is temporarily unavailable.' });
+      }
+    }
     const { id, type, role, teamId, email, username, name } = session.user;
     res.json({ authenticated: true, user: { id, type, role, teamId, email, username, name } });
   });
 
   // Gate Check-in / Venue Entry Endpoint for Admin Scanner
-  app.post("/api/teams/:id/check-in", requireAdmin, (req, res) => {
+  app.post("/api/teams/:id/check-in", requireAdmin, async (req, res) => {
     try {
+      await refreshProductionTeams();
       const { id } = req.params;
       const index = teams.findIndex(t => 
         t.id.toLowerCase() === id.toLowerCase() || 
@@ -1600,6 +1645,15 @@ export async function startServer(options: { listen?: boolean } = {}) {
       }
 
       const team = teams[index];
+      if (team.approvalStatus === 'PENDING' || team.status === 'PENDING_PAYMENT_AUDIT') {
+        return res.status(403).json({ success: false, error: 'REGISTRATION NOT APPROVED' });
+      }
+      if (team.approvalStatus === 'REJECTED' || team.status === 'REJECTED') {
+        return res.status(403).json({ success: false, error: 'REGISTRATION REJECTED' });
+      }
+      if (team.approvalStatus !== 'APPROVED') {
+        return res.status(403).json({ success: false, error: 'REGISTRATION NOT APPROVED' });
+      }
       const entryTime = new Date().toISOString();
       team.status = 'Checked-In';
       team.members = team.members.map(m => ({
@@ -1609,6 +1663,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
       }));
 
       teams[index] = team;
+      if (productionStoreEnabled) await updateProductionTeam(team);
       markDirty(); // persist check-in promptly
       console.log(`[GATE PASS SCANNED] Team ${team.id} (${team.teamName}) admitted to venue at ${entryTime}`);
       const safeTeam = sanitizeTeamForClient(team);
@@ -1623,9 +1678,31 @@ export async function startServer(options: { listen?: boolean } = {}) {
     }
   });
 
-  // Secure Participant Login Endpoint
-  app.post("/api/participant-login", (req, res) => {
+  // Scanner lookup is deliberately server-side: a QR is only an identifier,
+  // never proof that a team is eligible to enter the venue.
+  app.post("/api/checkin/verify", requireAdmin, async (req, res) => {
     try {
+      await refreshProductionTeams();
+    const teamId = String(req.body?.teamId || '').trim();
+    if (!teamId) return res.status(400).json({ success: false, error: 'INVALID TEAM' });
+    const team = teams.find((candidate) => candidate.id.toLowerCase() === teamId.toLowerCase());
+    if (!team) return res.status(404).json({ success: false, error: 'INVALID TEAM' });
+    if (team.approvalStatus === 'REJECTED' || team.status === 'REJECTED') {
+      return res.status(403).json({ success: false, error: 'REGISTRATION REJECTED' });
+    }
+    if (team.approvalStatus !== 'APPROVED') {
+      return res.status(403).json({ success: false, error: 'REGISTRATION NOT APPROVED' });
+    }
+      return res.json({ success: true, message: 'TEAM VERIFIED', team: sanitizeTeamForClient(team) });
+    } catch {
+      return res.status(503).json({ success: false, error: 'Unable to verify the team right now.' });
+    }
+  });
+
+  // Secure Participant Login Endpoint
+  app.post("/api/participant-login", async (req, res) => {
+    try {
+      await refreshProductionTeams();
       const { identifier, password } = req.body;
       if (!identifier || !password) {
         return res.status(400).json({ success: false, error: "Team credentials are required." });
@@ -1664,6 +1741,16 @@ export async function startServer(options: { listen?: boolean } = {}) {
           });
         }
         return res.status(401).json({ success: false, error: "Invalid credentials." });
+      }
+
+      if (team.approvalStatus === 'PENDING' || team.status === 'PENDING_PAYMENT_AUDIT') {
+        return res.status(403).json({ success: false, error: 'Awaiting Admin Confirmation.' });
+      }
+      if (team.approvalStatus === 'REJECTED' || team.status === 'REJECTED') {
+        return res.status(403).json({ success: false, error: 'Registration was rejected. Contact the event administrators for help.' });
+      }
+      if (team.approvalStatus !== 'APPROVED') {
+        return res.status(403).json({ success: false, error: 'Awaiting Admin Confirmation.' });
       }
 
       const storedHash = team.accessPassword || "";
@@ -1707,11 +1794,16 @@ export async function startServer(options: { listen?: boolean } = {}) {
     const genericMessage = "If the team exists and its leader email is eligible, a password reset message has been sent.";
     const identifier = String(req.body?.identifier || "").trim().toLowerCase();
     if (!identifier) return res.json({ success: true, message: genericMessage });
+    try {
+      await refreshProductionTeams();
+    } catch {
+      return res.json({ success: true, message: genericMessage });
+    }
 
     const team = teams.find((candidate) =>
       candidate.id.toLowerCase() === identifier || (candidate.regNumber || '').toLowerCase() === identifier
     );
-    if (!team || !team.leaderEmail) return res.json({ success: true, message: genericMessage });
+    if (!team || team.approvalStatus !== 'APPROVED' || !team.leaderEmail) return res.json({ success: true, message: genericMessage });
 
     try {
       if (!getSmtpConfig().configured) return res.json({ success: true, message: genericMessage });
@@ -1740,7 +1832,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
     }
   });
 
-  app.post("/api/participant/reset-password", (req, res) => {
+  app.post("/api/participant/reset-password", async (req, res) => {
     const token = String(req.body?.token || "").trim();
     const newPassword = String(req.body?.newPassword || "");
     if (!token || newPassword.length < 8 || newPassword.length > 128) {
@@ -1754,17 +1846,30 @@ export async function startServer(options: { listen?: boolean } = {}) {
       return res.status(400).json({ success: false, error: "The reset link is invalid or expired." });
     }
 
+    try {
+      await refreshProductionTeams();
+    } catch {
+      return res.status(503).json({ success: false, error: "The password could not be reset right now." });
+    }
     const team = teams.find((candidate) => candidate.id === tokenRecord.teamId);
     if (!team) {
       passwordResetTokens.delete(tokenHash);
       return res.status(400).json({ success: false, error: "The reset link is invalid or expired." });
     }
+    if (team.approvalStatus !== 'APPROVED') {
+      passwordResetTokens.delete(tokenHash);
+      return res.status(403).json({ success: false, error: "Participant portal access requires an approved registration." });
+    }
 
     const previousHash = team.accessPassword;
+    const previousCiphertext = team.portalPasswordCiphertext;
     team.accessPassword = hashPassword(newPassword);
+    team.portalPasswordCiphertext = encryptPortalPassword(newPassword);
     try {
-      if (!persistNow()) {
+      if (productionStoreEnabled) await updateProductionTeam(team);
+      if (!productionStoreEnabled && !persistNow()) {
         team.accessPassword = previousHash;
+        team.portalPasswordCiphertext = previousCiphertext;
         return res.status(500).json({ success: false, error: "The password could not be reset right now." });
       }
       passwordResetTokens.delete(tokenHash);
@@ -1785,7 +1890,8 @@ export async function startServer(options: { listen?: boolean } = {}) {
       return res.json({ success: true, message: "Your team portal password has been reset. You can now sign in." });
     } catch (error) {
       team.accessPassword = previousHash;
-      persistNow();
+      team.portalPasswordCiphertext = previousCiphertext;
+      if (!productionStoreEnabled) persistNow();
       return res.status(500).json({ success: false, error: "The password could not be reset right now." });
     }
   });
@@ -1808,6 +1914,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
       }
 
       const result = await withRegistrationLock(async () => {
+        await refreshProductionTeams();
         const productionConflict = await findProductionDuplicate({
           teamName: req.body?.teamName,
           participants: [req.body?.leader, ...(Array.isArray(req.body?.members) ? req.body.members : [])]
@@ -1864,7 +1971,11 @@ export async function startServer(options: { listen?: boolean } = {}) {
           };
         }
 
-        // 5. Generate secure team IDs and password
+        // Allocate from the durable ledger before constructing member IDs. The
+        // write below still rejects collisions from concurrent invocations.
+        if (productionStoreEnabled) {
+          nextTeamNumber = Math.max(nextTeamNumber, await getProductionNextTeamNumber());
+        }
         const teamIndex = ++nextTeamNumber;
         const teamId = `AN-${String(teamIndex).padStart(3, '0')}`;
         const genderAllowed = new Set(['Male', 'Female', 'Other', 'Prefer not to say']);
@@ -1910,14 +2021,10 @@ export async function startServer(options: { listen?: boolean } = {}) {
           };
         });
 
-        const accessPassword = generatePortalPassword();
-
         const newTeam: Team = {
           id: teamId,
           teamName: sanitizeInputString(teamName),
           leaderEmail: sanitizeInputString(leader.email.trim().toLowerCase()),
-          accessPassword: hashPassword(accessPassword),
-          portalPasswordPlain: accessPassword,
           domain: sanitizeInputString(selectedDomain),
           preferredTrack: sanitizeInputString(selectedDomain),
           members: [leaderParticipant, ...formattedMembers],
@@ -1937,18 +2044,27 @@ export async function startServer(options: { listen?: boolean } = {}) {
 
         if (productionStoreEnabled) {
           try {
-            await saveProductionTeam(newTeam);
+            for (let attempt = 0; attempt < 5; attempt += 1) {
+              try {
+                await saveProductionTeam(newTeam);
+                break;
+              } catch (storageError: any) {
+                if (storageError?.code !== 'TEAM_ID_EXISTS' || attempt === 4) throw storageError;
+                nextTeamNumber = Math.max(nextTeamNumber, await getProductionNextTeamNumber());
+                const retryIndex = ++nextTeamNumber;
+                const retryTeamId = `AN-${String(retryIndex).padStart(3, '0')}`;
+                newTeam.id = retryTeamId;
+                newTeam.members = newTeam.members.map((member, index) => ({
+                  ...member,
+                  id: `p-${retryIndex}-${index + 1}`,
+                  teamId: retryTeamId
+                }));
+              }
+            }
           } catch (storageError: any) {
-            console.error("[DATABASE] Production registration write failed:", storageError?.message || storageError);
-            if (storageError?.code === '23505') {
-              const constraint = String(storageError?.constraint || '');
-              const code = constraint.includes('team_name')
-                ? 'TEAM_NAME_EXISTS'
-                : constraint.includes('email')
-                  ? 'EMAIL_EXISTS'
-                  : constraint.includes('usn')
-                    ? 'USN_EXISTS'
-                    : 'PHONE_EXISTS';
+            console.error("[PERSISTENCE] Production registration write failed:", storageError?.message || storageError);
+            if (['TEAM_NAME_EXISTS', 'EMAIL_EXISTS', 'USN_EXISTS', 'PHONE_EXISTS'].includes(storageError?.code)) {
+              const code = storageError.code;
               return {
                 status: 409,
                 body: {
@@ -1963,7 +2079,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
               status: 503,
               body: {
                 success: false,
-                error: "Production registration storage is temporarily unavailable. Please retry."
+                error: "Registration storage is temporarily unavailable. Please retry."
               }
             };
           }
@@ -1974,19 +2090,16 @@ export async function startServer(options: { listen?: boolean } = {}) {
         markDirty();
 
         // Update the CSV backup only after the registration is committed to
-        // the authoritative store. In production, Neon remains authoritative;
-        // the CSV is a secondary audit/export backup.
-        try {
-          await appendParticipantRegistrationBackup(newTeam);
-          await syncParticipantBackupToGitHub(newTeam);
-        } catch (backupError) {
-          console.error(`[BACKUP] Team ${newTeam.id} was registered, but CSV backup update failed:`, backupError);
+        // the authoritative JSON ledger. The CSV is a secondary audit/export
+        // backup and is never the source of truth on Vercel.
+        if (!process.env.VERCEL) {
+          try {
+            await appendParticipantRegistrationBackup(newTeam);
+            await syncParticipantBackupToGitHub(newTeam);
+          } catch (backupError) {
+            console.error(`[BACKUP] Team ${newTeam.id} was registered, but CSV backup update failed:`, backupError);
+          }
         }
-
-        const allTeamEmails = [
-          { email: leader.email, name: leader.fullName, role: 'Leader' },
-          ...members.filter((m: any) => m.email).map((m: any) => ({ email: m.email, name: m.fullName, role: 'Member' }))
-        ];
 
         const totalParticipants = teams.reduce((acc, t) => acc + t.members.length, 0);
         const uniqueColleges = new Set(teams.flatMap(t => t.members.map(m => m.college))).size;
@@ -1999,7 +2112,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
           team: registrationTeam,
           message: "Please wait for the admin's approval. Keep yourself updated by regularly checking your Gmail for further updates.",
           emailDispatched: false,
-          emailRecipients: allTeamEmails.map(e => e.email),
+          emailRecipients: [],
           stats: {
             registeredCount: totalParticipants,
             collegesCount: uniqueColleges,
@@ -2184,8 +2297,13 @@ export async function startServer(options: { listen?: boolean } = {}) {
   // Registration Confirmation Email dispatch. Sends a real mail to every
   // leader/member when SMTP is configured (SMTP_HOST/USER/PASS), else returns a
   // downloadable .eml fallback. Includes the Gate Entry Pass QR in the body.
-  app.post("/api/send-registration-email", async (req, res) => {
+  app.post("/api/send-registration-email", requireAdmin, async (req, res) => {
     try {
+      // This legacy endpoint accepted arbitrary recipients and a caller-supplied
+      // password. Keep the route so old clients receive a clear response, but
+      // never let it bypass the approval-only credential workflow.
+      return res.status(410).json({ success: false, error: 'Use the approved team credential delivery endpoint.' });
+      /*
       const { teamId, email, emails, teamName, domain, track, password, participants } = req.body;
       // participants: [{ email, name, college, role }] — used so the confirmation
       // mail always includes the College of every registered participant.
@@ -2212,7 +2330,8 @@ export async function startServer(options: { listen?: boolean } = {}) {
       try {
         gateQr = await QRCode.toDataURL(String(teamId || "AN-000"), { width: 220, margin: 1, errorCorrectionLevel: "H", color: { dark: "#0B192C", light: "#FFFFFF" } });
         gateQrBuffer = await QRCode.toBuffer(String(teamId || "AN-000"), { width: 220, margin: 1, errorCorrectionLevel: "H", color: { dark: "#0B192C", light: "#FFFFFF" } });
-      } catch (e) { /* optional */ }
+      } catch (e) { // optional
+      }
       const venue = "K.S. School of Engineering & Management (KSSEM), Kanakapura Road, Bengaluru - 560109";
       const dates = "October 8 - October 9, 2026 (24-Hour Hackathon)";
       const htmlR = `ANVATION 2026 - Registration Confirmed
@@ -2308,24 +2427,34 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         console.warn(`[EMAIL] SMTP incomplete (${smtp.missing.join(", ")}) — real mail was NOT delivered. Generated local .eml fallback for team ${teamId}.`);
         res.json({ success: true, message: "SMTP is not fully configured, so real emails were not sent. A downloadable .eml was generated as a fallback.", recipients: recipientList, emailRecipients: recipientList.map(r => ({ recipient: r, status: "READY" })), deliveredCount: 0, failedCount: 0, subject, eml, smtpConfigured: false });
       }
-    } catch (err: any) {
+    */ } catch (err: any) {
       console.error("[EMAIL ERROR]", err);
       res.status(500).json({ success: false, error: "Email delivery could not be completed." });
     }
   });
 
   // Edit / Update Team Endpoint (Used by Admin & Registration Slip Edit)
-  app.put("/api/teams/:id", requireAdmin, (req, res) => {
+  app.put("/api/teams/:id", requireAdmin, async (req, res) => {
     try {
+      await refreshProductionTeams();
       const { id } = req.params;
-      const updateData = req.body;
+      const updateData = { ...(req.body || {}) };
       const index = teams.findIndex(t => t.id.toLowerCase() === id.toLowerCase() || (t.regNumber || '').toLowerCase() === id.toLowerCase());
 
       if (index === -1) {
         return res.status(404).json({ success: false, error: "Team not found" });
       }
 
-      // Merge team updates safely
+      // Approval, payment-verdict, credential, and check-in fields are only
+      // changed by their dedicated audited endpoints.
+      [
+        'id', 'regNumber', 'approvalStatus', 'approvalTimestamp', 'approvalBy',
+        'approvalRejectionReason', 'approvalEmailStatus', 'approvalEmailSentAt',
+        'credentialDeliveryStatus', 'accessPassword', 'portalPasswordCiphertext',
+        'portalPasswordPlain', 'status', 'paymentStatus'
+      ].forEach((field) => delete updateData[field]);
+
+      // Merge non-sensitive administrative corrections safely.
       const existingTeam = teams[index];
       const updatedTeam: Team = {
         ...existingTeam,
@@ -2348,6 +2477,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         }
       }
 
+      if (productionStoreEnabled) await updateProductionTeam(updatedTeam);
       teams[index] = updatedTeam;
       rebuildUniquenessIndexes();
       markDirty();
@@ -2358,8 +2488,9 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Participants complete optional profile fields after registration.
-  app.put("/api/participant/profile", requireAuth, (req, res) => {
+  app.put("/api/participant/profile", requireTeamAccess, async (req, res) => {
     try {
+      await refreshProductionTeams();
       const teamId = String(req.session?.teamId || "").trim();
       const index = teams.findIndex((team) => team.id.toLowerCase() === teamId.toLowerCase());
       if (!teamId || index === -1) return res.status(404).json({ success: false, error: "Participant team not found." });
@@ -2379,6 +2510,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
           return { ...member, ...profile };
         })
       };
+      if (productionStoreEnabled) await updateProductionTeam(updatedTeam);
       teams[index] = updatedTeam;
       markDirty();
       res.json({ success: true, team: sanitizeTeamForClient(updatedTeam) });
@@ -2388,30 +2520,44 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Reissue a participant portal password without exposing or persisting the plaintext value.
-  app.post("/api/admin/teams/:teamId/reset-password", requireRole(["ADMIN", "REGISTRATION_MANAGER", "SUPER_ADMIN"]), (req, res) => {
-    const teamId = String(req.params.teamId || "").trim();
-    const index = teams.findIndex((team) =>
-      team.id.toLowerCase() === teamId.toLowerCase() || (team.regNumber || '').toLowerCase() === teamId.toLowerCase()
-    );
-
-    if (index === -1) {
-      return res.status(404).json({ success: false, error: "Team not found." });
-    }
-
-    const previousTeam = teams[index];
-    const temporaryPassword = generatePortalPassword();
-    teams[index] = { ...previousTeam, accessPassword: hashPassword(temporaryPassword) };
-
+  app.post("/api/admin/teams/:teamId/reset-password", requireRole(["ADMIN", "REGISTRATION_MANAGER", "SUPER_ADMIN"]), async (req, res) => {
+    let previousTeam: Team | null = null;
+    let passwordPersisted = false;
     try {
-      rebuildUniquenessIndexes();
-      if (!persistNow()) {
-        teams[index] = previousTeam;
-        rebuildUniquenessIndexes();
-        return res.status(500).json({ success: false, error: "Password reset could not be persisted." });
+      await refreshProductionTeams();
+      const teamId = String(req.params.teamId || "").trim();
+      const index = teams.findIndex((team) =>
+        team.id.toLowerCase() === teamId.toLowerCase() || (team.regNumber || '').toLowerCase() === teamId.toLowerCase()
+      );
+
+      if (index === -1) {
+        return res.status(404).json({ success: false, error: "Team not found." });
       }
 
+      previousTeam = teams[index];
+      if (previousTeam.approvalStatus !== 'APPROVED') {
+        return res.status(409).json({ success: false, error: 'Portal credentials can only be issued after approval.' });
+      }
+      const temporaryPassword = generatePortalPassword();
+      const resetTeam: Team = {
+        ...previousTeam,
+        accessPassword: hashPassword(temporaryPassword),
+        portalPasswordCiphertext: encryptPortalPassword(temporaryPassword),
+        approvalEmailStatus: 'PENDING',
+        approvalEmailSentAt: ''
+      };
+
+      if (productionStoreEnabled) await updateProductionTeam(resetTeam);
+      teams[index] = resetTeam;
+      rebuildUniquenessIndexes();
+      if (!productionStoreEnabled && !persistNow()) {
+        throw new Error("Password reset could not be persisted.");
+      }
+      passwordPersisted = true;
+      await sendApprovalEmail(resetTeam, temporaryPassword, 'password-reset');
+
       for (const [sessionId, session] of sessionStore.entries()) {
-        if (session.user.type === "participant" && session.user.teamId === previousTeam.id) {
+        if (session.user.type === "participant" && session.user.teamId === resetTeam.id) {
           sessionStore.delete(sessionId);
         }
       }
@@ -2422,65 +2568,84 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         actorEmail: req.session?.email || req.session?.username || "unknown-admin",
         actorRole: (req.session?.role || "ADMIN") as AdminRole,
         action: "participant_password_reset",
-        target: previousTeam.id,
+        target: resetTeam.id,
         reason: "Portal password reissued by authorized administrator.",
         ipAddress: getClientIp(req)
       });
-      persistNow();
+      if (!productionStoreEnabled) persistNow();
 
       return res.json({
         success: true,
-        message: "Portal password reset successfully.",
-        participantId: previousTeam.id,
-        temporaryPassword
+        message: "A new portal password was securely emailed to the registered team members.",
+        participantId: resetTeam.id
       });
-    } catch (error) {
-      teams[index] = previousTeam;
+    } catch (error: any) {
+      if (!passwordPersisted) {
+        return res.status(503).json({ success: false, error: "Password reset could not be persisted." });
+      }
+      if (previousTeam) {
+        const currentTeam = teams.find((team) => team.id === previousTeam!.id);
+        if (currentTeam && currentTeam.accessPassword !== previousTeam.accessPassword) {
+          currentTeam.approvalEmailStatus = 'FAILED';
+          if (productionStoreEnabled) {
+            try { await updateProductionTeam(currentTeam); } catch { /* response below */ }
+          }
+        }
+      }
       rebuildUniquenessIndexes();
-      return res.status(500).json({ success: false, error: "Password reset failed." });
+      if (!productionStoreEnabled) persistNow();
+      return res.status(500).json({ success: false, error: "The password was reset, but its email could not be delivered. Retry the reset after confirming SMTP configuration." });
     }
   });
 
   // Delete Team Endpoint
-  app.delete("/api/teams/:id", requireSuperAdmin, (req, res) => {
-    const { id } = req.params;
-    const initialLen = teams.length;
-    teams = teams.filter(t => t.id.toLowerCase() !== id.toLowerCase() && (t.regNumber || '').toLowerCase() !== id.toLowerCase());
-    if (teams.length === initialLen) {
-      return res.status(404).json({ success: false, error: "Team not found" });
+  app.delete("/api/teams/:id", requireSuperAdmin, async (req, res) => {
+    try {
+      await refreshProductionTeams();
+      const { id } = req.params;
+      const team = teams.find((candidate) => candidate.id.toLowerCase() === id.toLowerCase() || (candidate.regNumber || '').toLowerCase() === id.toLowerCase());
+      if (!team) return res.status(404).json({ success: false, error: "Team not found" });
+      if (productionStoreEnabled) await deleteProductionTeam(team.id);
+      teams = teams.filter((candidate) => candidate.id !== team.id);
+      rebuildUniquenessIndexes();
+      markDirty();
+      return res.json({ success: true, message: "Team deleted successfully" });
+    } catch {
+      return res.status(503).json({ success: false, error: "Team deletion could not be persisted." });
     }
-    rebuildUniquenessIndexes();
-    res.json({ success: true, message: "Team deleted successfully" });
-    markDirty();
   });
 
   // Edit / Update Individual Participant Endpoint
-  app.put("/api/participants/:id", requireAdmin, (req, res) => {
-    const { id } = req.params;
-    const participantData = req.body;
+  app.put("/api/participants/:id", requireAdmin, async (req, res) => {
+    try {
+      await refreshProductionTeams();
+      const { id } = req.params;
+      const participantData = req.body;
 
-    let found = false;
-    for (const team of teams) {
-      const memberIndex = team.members.findIndex(m => m.id === id || m.usn.toLowerCase() === id.toLowerCase());
-      if (memberIndex !== -1) {
-        team.members[memberIndex] = {
-          ...team.members[memberIndex],
-          ...participantData
-        };
-        rebuildUniquenessIndexes();
-        markDirty();
-        found = true;
-        return res.json({ success: true, participant: team.members[memberIndex], message: "Participant updated successfully" });
+      for (const team of teams) {
+        const memberIndex = team.members.findIndex(m => m.id === id || m.usn.toLowerCase() === id.toLowerCase());
+        if (memberIndex !== -1) {
+          const updatedTeam: Team = {
+            ...team,
+            members: team.members.map((member, index) => index === memberIndex ? { ...member, ...participantData, id: member.id, teamId: team.id } : member)
+          };
+          if (productionStoreEnabled) await updateProductionTeam(updatedTeam);
+          Object.assign(team, updatedTeam);
+          rebuildUniquenessIndexes();
+          markDirty();
+          return res.json({ success: true, participant: updatedTeam.members[memberIndex], message: "Participant updated successfully" });
+        }
       }
-    }
-
-    if (!found) {
-      res.status(404).json({ success: false, error: "Participant not found" });
+      return res.status(404).json({ success: false, error: "Participant not found" });
+    } catch (error: any) {
+      return res.status(503).json({ success: false, error: error?.message || "Participant update could not be persisted." });
     }
   });
 
   // QR Check-In
-  app.post("/api/checkin", requireAdmin, (req, res) => {
+  app.post("/api/checkin", requireAdmin, async (req, res) => {
+    try {
+      await refreshProductionTeams();
     const { query } = req.body; // Team ID or USN or Email
     if (!query) return res.status(400).json({ success: false, error: "Query required" });
 
@@ -2494,6 +2659,12 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     if (!team) {
       return res.status(404).json({ success: false, error: "Participant or Team not found" });
     }
+    if (team.approvalStatus === 'REJECTED' || team.status === 'REJECTED') {
+      return res.status(403).json({ success: false, error: 'REGISTRATION REJECTED' });
+    }
+    if (team.approvalStatus !== 'APPROVED') {
+      return res.status(403).json({ success: false, error: 'REGISTRATION NOT APPROVED' });
+    }
 
     team.status = 'Checked-In';
     team.members.forEach(m => {
@@ -2501,7 +2672,13 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       m.checkInTime = new Date().toISOString();
     });
 
-    res.json({ success: true, team, message: `Team ${team.teamName} successfully checked in at KSSEM venue!` });
+    if (productionStoreEnabled) await updateProductionTeam(team);
+    markDirty();
+
+    res.json({ success: true, team: sanitizeTeamForClient(team), message: `Team ${team.teamName} successfully checked in at KSSEM venue!` });
+    } catch {
+      res.status(503).json({ success: false, error: 'Unable to complete check-in right now.' });
+    }
   });
 
   // Food Coupon Claim
@@ -2738,17 +2915,26 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   });
 
   // Team Edit by Super Admin
-  app.post("/api/teams/edit", requireAdmin, (req, res) => {
-    const { id, teamName, preferredTrack, checkedIn, status } = req.body;
-    const team = teams.find(t => t.id === id);
-    if (!team) return res.status(404).json({ success: false, error: "Team not found" });
+  app.post("/api/teams/edit", requireAdmin, async (req, res) => {
+    try {
+      await refreshProductionTeams();
+      const { id, teamName, preferredTrack } = req.body;
+      const index = teams.findIndex((team) => team.id === id);
+      if (index === -1) return res.status(404).json({ success: false, error: "Team not found" });
 
-    if (teamName) team.teamName = teamName;
-    if (preferredTrack) team.preferredTrack = preferredTrack;
-    if (status) team.status = status;
-    else if (checkedIn) team.status = 'Checked-In';
-    
-    res.json({ success: true, team });
+      const existingTeam = teams[index];
+      const team: Team = {
+        ...existingTeam,
+        ...(teamName ? { teamName: sanitizeInputString(teamName) } : {}),
+        ...(preferredTrack ? { preferredTrack: sanitizeInputString(preferredTrack), domain: sanitizeInputString(preferredTrack) } : {})
+      };
+      if (productionStoreEnabled) await updateProductionTeam(team);
+      teams[index] = team;
+      markDirty();
+      return res.json({ success: true, team: sanitizeTeamForClient(team) });
+    } catch (error: any) {
+      return res.status(503).json({ success: false, error: error?.message || "Team update could not be persisted." });
+    }
   });
 
   // Audit Logs Store
@@ -2806,10 +2992,15 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       if (!fs.existsSync(DATA_FILE)) return;
       const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
       if (Array.isArray(saved.teams)) {
-        teams = saved.teams.map((team: any) => ({
-          ...team,
-            accessPassword: normalizeStoredPassword(team.accessPassword),
-        }));
+        teams = saved.teams.map((team: any) => {
+          const { portalPasswordPlain, ...storedTeam } = team;
+          return {
+            ...storedTeam,
+            accessPassword: normalizeStoredPassword(storedTeam.accessPassword),
+            // Upgrade legacy local records without retaining plaintext passwords.
+            portalPasswordCiphertext: storedTeam.portalPasswordCiphertext || (portalPasswordPlain ? encryptPortalPassword(String(portalPasswordPlain)) : undefined),
+          };
+        });
       }
       if (Array.isArray(saved.adminUsers)) {
         const savedMap = new Map<string, any>(saved.adminUsers.map((u: any) => [u.id, u]));
@@ -2844,16 +3035,19 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   };
 
   const persistNow = (): boolean => {
+    // Vercel's function filesystem is ephemeral. Live registrations are
+    // committed through productionStore instead of writing beneath /var/task.
+    if (process.env.VERCEL) return true;
     try {
       // Write atomically: dump to a temp file first, then rename over the real
       // file. This guarantees server-data.json is never left half-written if the
       // process is killed mid-write (which previously corrupted the file and led
       // to the team store being wiped on the next startup).
       fs.mkdirSync(DATA_DIRECTORY, { recursive: true, mode: 0o700 });
-      const sanitizedTeams = teams.map((team) => ({
-        ...team,
-        accessPassword: normalizeStoredPassword(team.accessPassword),
-      }));
+      const sanitizedTeams = teams.map((team: any) => {
+        const { portalPasswordPlain, ...storedTeam } = team;
+        return { ...storedTeam, accessPassword: normalizeStoredPassword(storedTeam.accessPassword) };
+      });
       const normalizedAdminUsers = adminUsers.map((user) => ({
         ...user,
         password: normalizeStoredPassword(user.password)
@@ -2896,14 +3090,14 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     rebuildUniquenessIndexes();
   }
   try {
-    if (!productionStoreEnabled) initialiseParticipantRegistrationBackup();
+    if (!process.env.VERCEL) initialiseParticipantRegistrationBackup();
   } catch (backupError) {
     // New registrations still fail safely if their own CSV append cannot be
     // written. Keep startup alive so an operator can fix disk permissions
     // without taking the entire site down.
     console.error("[BACKUP] Could not initialise participant registration CSV:", backupError);
   }
-  setInterval(persistNow, 5000);
+  if (!process.env.VERCEL) setInterval(persistNow, 5000);
 
   // Rulebook Versions
   let rulebooks: RulebookVersion[] = [
@@ -3530,36 +3724,60 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
   app.post("/api/admin/teams/:teamId/approve", requireAdmin, async (req, res) => {
     try {
       const { teamId } = req.params;
-      const team = teams.find((candidate) => candidate.id.toLowerCase() === teamId.toLowerCase());
-      if (!team) return res.status(404).json({ success: false, error: "Team not found" });
-      if (team.approvalStatus === 'APPROVED') {
-        return res.json({ success: true, team, alreadyApproved: true, message: 'Team already approved.' });
+      await refreshProductionTeams();
+      const pendingTeam = teams.find((candidate) => candidate.id.toLowerCase() === teamId.toLowerCase());
+      if (!pendingTeam) return res.status(404).json({ success: false, error: "Team not found" });
+      if (pendingTeam.approvalStatus === 'APPROVED') {
+        if (pendingTeam.approvalEmailStatus !== 'SENT') {
+          try {
+            await sendApprovalEmail(pendingTeam, decryptPortalPassword(pendingTeam.portalPasswordCiphertext));
+            pendingTeam.approvalEmailStatus = 'SENT';
+            pendingTeam.approvalEmailSentAt = new Date().toISOString();
+          } catch (emailErr: any) {
+            pendingTeam.approvalEmailStatus = 'FAILED';
+            console.error('[EMAIL APPROVAL] Retry failed for team', pendingTeam.id, emailErr?.message || emailErr);
+          }
+          if (productionStoreEnabled) await updateProductionTeam(pendingTeam);
+          markDirty();
+        }
+        return res.json({ success: true, team: sanitizeTeamForClient(pendingTeam), alreadyApproved: true, approvalEmailStatus: pendingTeam.approvalEmailStatus, message: 'Team already approved.' });
       }
-      if (team.approvalStatus === 'REJECTED') {
+      if (pendingTeam.approvalStatus === 'REJECTED') {
         return res.status(409).json({ success: false, error: 'This team has already been rejected and cannot be approved.' });
       }
 
-      const previousApprovalStatus = team.approvalStatus || 'PENDING';
+      const previousApprovalStatus = pendingTeam.approvalStatus || 'PENDING';
+      const portalPassword = generatePortalPassword();
+      const team = pendingTeam;
       team.approvalStatus = 'APPROVED';
       team.approvalTimestamp = new Date().toISOString();
       team.status = 'Confirmed' as any;
       team.paymentStatus = 'PAYMENT_APPROVED' as any;
-      team.paymentAmountDetail = `Payment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.`;
+      team.paymentAmountDetail = `Payment of ₹${cmsConfig.registrationFee ?? 0} has been verified. Registration approved.`;
       team.approvalEmailStatus = 'PENDING';
+      team.accessPassword = hashPassword(portalPassword);
+      team.portalPasswordCiphertext = encryptPortalPassword(portalPassword);
 
       if (productionStoreEnabled) {
-        try { await updateProductionTeam(team); } catch (storageErr) { console.error('[DATABASE] Production approval update failed:', storageErr); }
+        const transitioned = await transitionProductionTeam(team.id, team);
+        if (transitioned.alreadyTransitioned) {
+          teams = teams.map((candidate) => candidate.id === team.id ? transitioned.team : candidate);
+          return res.json({ success: true, team: sanitizeTeamForClient(transitioned.team), alreadyApproved: true, message: 'Team already approved.' });
+        }
+        Object.assign(team, transitioned.team);
       }
       markDirty();
 
       try {
-        await sendApprovalEmail(team);
+        await sendApprovalEmail(team, portalPassword);
         team.approvalEmailStatus = 'SENT';
         team.approvalEmailSentAt = new Date().toISOString();
       } catch (emailErr: any) {
         team.approvalEmailStatus = 'FAILED';
         console.error('[EMAIL APPROVAL] Failed for team', team.id, emailErr?.message || emailErr);
       }
+      if (productionStoreEnabled) await updateProductionTeam(team);
+      markDirty();
 
       auditLogs.unshift({
         id: `log-${Date.now()}`,
@@ -3574,7 +3792,7 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         ipAddress: req.ip || '127.0.0.1'
       });
 
-      return res.json({ success: true, team, approved: true, approvalEmailStatus: team.approvalEmailStatus, message: 'Team approved successfully.' });
+      return res.json({ success: true, team: sanitizeTeamForClient(team), approved: true, approvalEmailStatus: team.approvalEmailStatus, message: 'Team approved successfully.' });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message || 'Could not approve team.' });
     }
@@ -3584,16 +3802,18 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
     try {
       const { teamId } = req.params;
       const { reason } = req.body;
-      const team = teams.find((candidate) => candidate.id.toLowerCase() === teamId.toLowerCase());
-      if (!team) return res.status(404).json({ success: false, error: "Team not found" });
-      if (team.approvalStatus === 'REJECTED') {
-        return res.json({ success: true, team, alreadyRejected: true, message: 'Team already rejected.' });
+      await refreshProductionTeams();
+      const pendingTeam = teams.find((candidate) => candidate.id.toLowerCase() === teamId.toLowerCase());
+      if (!pendingTeam) return res.status(404).json({ success: false, error: "Team not found" });
+      if (pendingTeam.approvalStatus === 'REJECTED') {
+        return res.json({ success: true, team: sanitizeTeamForClient(pendingTeam), alreadyRejected: true, message: 'Team already rejected.' });
       }
-      if (team.approvalStatus === 'APPROVED') {
+      if (pendingTeam.approvalStatus === 'APPROVED') {
         return res.status(409).json({ success: false, error: 'This team has already been approved and cannot be rejected.' });
       }
 
-      const previousApprovalStatus = team.approvalStatus || 'PENDING';
+      const previousApprovalStatus = pendingTeam.approvalStatus || 'PENDING';
+      const team = pendingTeam;
       team.approvalStatus = 'REJECTED';
       team.approvalTimestamp = new Date().toISOString();
       team.approvalReason = String(reason || 'Payment audit rejected by admin').trim();
@@ -3603,7 +3823,12 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
       team.approvalEmailStatus = 'PENDING';
 
       if (productionStoreEnabled) {
-        try { await updateProductionTeam(team); } catch (storageErr) { console.error('[DATABASE] Production rejection update failed:', storageErr); }
+        const transitioned = await transitionProductionTeam(team.id, team);
+        if (transitioned.alreadyTransitioned) {
+          teams = teams.map((candidate) => candidate.id === team.id ? transitioned.team : candidate);
+          return res.json({ success: true, team: sanitizeTeamForClient(transitioned.team), alreadyRejected: true, message: 'Team already rejected.' });
+        }
+        Object.assign(team, transitioned.team);
       }
       markDirty();
 
@@ -3620,104 +3845,19 @@ Use your Team ID and Password (or Leader email) to log into the Participant Port
         ipAddress: req.ip || '127.0.0.1'
       });
 
-      return res.json({ success: true, team, rejected: true, message: 'Team rejected successfully.' });
+      return res.json({ success: true, team: sanitizeTeamForClient(team), rejected: true, message: 'Team rejected successfully.' });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message || 'Could not reject team.' });
     }
   });
 
   app.post("/api/finance/verify-utr", requireAdmin, async (req, res) => {
-    const { teamId, paymentStatus } = req.body; // 'Verified' or 'Rejected'
-    const team = teams.find((candidate) => candidate.id.toLowerCase() === String(teamId || '').toLowerCase() || (candidate.regNumber || '').toLowerCase() === String(teamId || '').toLowerCase());
-    if (!team) return res.status(404).json({ success: false, error: "Team not found" });
-
-    if (paymentStatus === 'Rejected') {
-      const teamToRemove = { ...team };
-      const oldSessions = new Map<string, any>();
-
-      for (const [sid, session] of sessionStore.entries()) {
-        if (session.user.type === 'participant' && session.user.teamId === team.id) {
-          oldSessions.set(sid, session);
-          sessionStore.delete(sid);
-        }
-      }
-
-      if (productionStoreEnabled) {
-        try {
-          await deleteProductionTeam(team.id);
-        } catch (storageErr) {
-          console.error('[DATABASE] Production team deletion for rejected payment failed:', storageErr);
-        }
-      }
-
-      teams = teams.filter((candidate) => candidate.id.toLowerCase() !== team.id.toLowerCase() && (candidate.regNumber || '').toLowerCase() !== team.id.toLowerCase());
-      rebuildUniquenessIndexes();
-      markDirty();
-
-      try {
-        fs.writeFileSync(PARTICIPANT_BACKUP_FILE, participantBackupFileContents(teams), { encoding: 'utf8', mode: 0o600 });
-      } catch (backupErr) {
-        console.error('[BACKUP] Failed to rewrite participant registration CSV after payment rejection:', backupErr);
-      }
-
-      auditLogs.unshift({
-        id: `log-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        actorEmail: req.session?.email || req.session?.username || 'unknown-admin',
-        actorRole: (req.session?.role || 'ADMIN') as AdminRole,
-        action: 'Payment Status Change: Rejected + credentials removed',
-        target: `Team ${team.teamName} (${team.id})`,
-        beforeValue: team.paymentStatus || 'Pending',
-        afterValue: 'Rejected + Removed',
-        reason: 'Payment UTR rejected by finance admin. Team and participants removed from active directories.',
-        ipAddress: getClientIp(req)
-      });
-
-      return res.json({ success: true, removed: true, team: teamToRemove, message: 'Rejected payment team removed from active registration, team control and participant directory.' });
-    }
-
-    if (paymentStatus === 'Verified') {
-      team.paymentStatus = 'PAYMENT_APPROVED' as any;
-      team.paymentAmountDetail = `Payment of ₹${cmsConfig.registrationFee || 0} has been verified. Registration approved.`;
-      team.status = 'Confirmed' as any;
-      team.approvalStatus = 'APPROVED';
-      team.approvalTimestamp = new Date().toISOString();
-      team.approvalEmailStatus = 'PENDING';
-
-      try {
-        await sendApprovalEmail(team);
-        team.approvalEmailStatus = 'SENT';
-        team.approvalEmailSentAt = new Date().toISOString();
-      } catch (emailErr: any) {
-        team.approvalEmailStatus = 'FAILED';
-        console.error('[EMAIL APPROVAL] Failed for team', team.id, emailErr?.message || emailErr);
-      }
-    } else {
-      team.paymentStatus = paymentStatus;
-    }
-
-    if (productionStoreEnabled) {
-      try {
-        await updateProductionTeam(team);
-      } catch (storageErr) {
-        console.error('[DATABASE] Production verification update failed:', storageErr);
-      }
-    }
-
-    auditLogs.unshift({
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      actorEmail: req.session?.email || req.session?.username || 'unknown-admin',
-      actorRole: (req.session?.role || 'ADMIN') as AdminRole,
-      action: `Payment Status Change: ${paymentStatus}`,
-      target: `Team ${team.teamName} (${team.id})`,
-      beforeValue: team.paymentUtr || 'No UTR',
-      afterValue: paymentStatus,
-      reason: `Finance audit verification by Super Admin`,
-      ipAddress: getClientIp(req)
+    // Retained for clients on older deployments. Approval must use the explicit
+    // approval endpoint so a payment audit cannot bypass the pending state.
+    return res.status(410).json({
+      success: false,
+      error: 'Use the team approval or rejection action from the payment audit ledger.'
     });
-
-    res.json({ success: true, team });
   });
 
   // Judging Rounds API

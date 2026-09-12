@@ -213,7 +213,6 @@ export const AdminPortal: React.FC = () => {
     teamId: string;
     teamName: string;
     status: 'confirm' | 'loading' | 'success' | 'error';
-    password?: string;
     error?: string;
   } | null>(null);
 
@@ -699,11 +698,11 @@ export const AdminPortal: React.FC = () => {
         headers: { 'Content-Type': 'application/json' }
       });
       const data = await res.json();
-      if (!res.ok || !data.success || !data.temporaryPassword) {
+      if (!res.ok || !data.success) {
         setPasswordReset({ teamId, teamName, status: 'error', error: data.error || 'Password reset failed.' });
         return;
       }
-      setPasswordReset({ teamId, teamName, status: 'success', password: data.temporaryPassword });
+      setPasswordReset({ teamId, teamName, status: 'success' });
       fetchAdminData();
     } catch (err) {
       console.error(err);
@@ -1064,10 +1063,11 @@ export const AdminPortal: React.FC = () => {
 
   const handleVerifyUTR = async (teamId: string, status: 'Verified' | 'Rejected') => {
     try {
-      const res = await fetch('/api/finance/verify-utr', {
+      const action = status === 'Verified' ? 'approve' : 'reject';
+      const res = await fetch(`/api/admin/teams/${encodeURIComponent(teamId)}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teamId, paymentStatus: status })
+        body: status === 'Rejected' ? JSON.stringify({ reason: 'Payment audit rejected by admin.' }) : undefined
       });
       const data = await res.json();
       if (data.success) {
@@ -3348,7 +3348,7 @@ export const AdminPortal: React.FC = () => {
                 <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
                   <span className="text-[11px] text-slate-400 font-bold uppercase">Total Verified Revenue</span>
                   <div className="text-2xl font-black text-emerald-400 font-mono">
-                    ₹{teams.filter(t => t.paymentStatus === 'Verified' || t.paymentStatus === 'PAYMENT_APPROVED').reduce((sum, team) => sum + team.members.length * (cmsConfig.registrationFee || 250), 0)}
+                    ₹{teams.filter(t => t.paymentStatus === 'Verified' || t.paymentStatus === 'PAYMENT_APPROVED').reduce((sum, team) => sum + team.members.length * (cmsConfig.registrationFee ?? 0), 0)}
                   </div>
                   <p className="text-[10px] text-slate-500">{teams.filter(t => t.paymentStatus === 'Verified' || t.paymentStatus === 'PAYMENT_APPROVED').length} Teams Verified</p>
                 </div>
@@ -3363,7 +3363,7 @@ export const AdminPortal: React.FC = () => {
 
                 <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
                   <span className="text-[11px] text-slate-400 font-bold uppercase">Fee Rate Per Team</span>
-                  <div className="text-2xl font-black text-cyan-300 font-mono">₹{cmsConfig.registrationFee || 250}</div>
+                  <div className="text-2xl font-black text-cyan-300 font-mono">₹{cmsConfig.registrationFee ?? 0}</div>
                   <p className="text-[10px] text-slate-500">UPI VPA: {cmsConfig.upiId || 'kssem.hacknove@upi'}</p>
                 </div>
               </div>
@@ -3381,6 +3381,7 @@ export const AdminPortal: React.FC = () => {
                         <th className="p-3">Payment Detail</th>
                         <th className="p-3">UTR Reference No</th>
                         <th className="p-3">Screenshot</th>
+                        <th className="p-3">Portal Password</th>
                         <th className="p-3">Status</th>
                         <th className="p-3">Team Status</th>
                         <th className="p-3">Action</th>
@@ -3394,7 +3395,7 @@ export const AdminPortal: React.FC = () => {
                             <div className="font-mono text-[10px] text-cyan-400">{t.id}</div>
                           </td>
                           <td className="p-3 text-slate-300 text-[11px]">{t.leaderEmail}</td>
-                          <td className="p-3 font-mono font-bold text-emerald-400">₹{t.members.length * (cmsConfig.registrationFee || 250)}</td>
+                          <td className="p-3 font-mono font-bold text-emerald-400">₹{t.members.length * (cmsConfig.registrationFee ?? 0)}</td>
                           <td className="p-3 text-slate-300 text-[11px] min-w-48">{t.paymentAmountDetail || 'Not specified'}</td>
                           <td className="p-3 font-mono text-amber-300 font-bold">{t.paymentUtr || 'N/A'}</td>
                           <td className="p-3">
@@ -3409,6 +3410,11 @@ export const AdminPortal: React.FC = () => {
                             ) : (
                               <span className="text-slate-500 text-[10px]">No proof</span>
                             )}
+                          </td>
+                          <td className="p-3 text-[10px] text-slate-300">
+                            {t.approvalStatus === 'APPROVED'
+                              ? 'Generated and sent securely'
+                              : 'Not issued'}
                           </td>
                           <td className="p-3">
                             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
@@ -3696,20 +3702,13 @@ export const AdminPortal: React.FC = () => {
               <>
                 <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-700/60 space-y-2">
                   <div className="text-sm font-black text-emerald-300">Password Reset Successful</div>
-                  <div className="text-xs text-slate-400">New Portal Password:</div>
-                  <div className="text-lg font-mono font-black tracking-wider text-white break-all">{passwordReset.password}</div>
+                  <div className="text-xs text-slate-400">The newly generated password was sent only to the registered team member emails.</div>
                 </div>
-                <p className="text-xs text-slate-400">Give this password to the participant. It will not be shown again after this dialog is closed.</p>
+                <p className="text-xs text-slate-400">For security, portal credentials are never displayed in the admin interface.</p>
                 <div className="flex gap-3">
                   <button
-                    onClick={() => navigator.clipboard.writeText(passwordReset.password || '')}
-                    className="flex-1 py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold flex items-center justify-center gap-2"
-                  >
-                    <Key className="w-3.5 h-3.5" /> Copy Password
-                  </button>
-                  <button
                     onClick={() => setPasswordReset(null)}
-                    className="px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-300 text-xs font-bold"
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-300 text-xs font-bold"
                   >
                     Close
                   </button>
