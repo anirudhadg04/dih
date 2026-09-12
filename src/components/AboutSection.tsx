@@ -4,6 +4,10 @@ import { Target, Eye, Award, MapPin } from 'lucide-react';
 import campusBgImage from '../assets/images/kssem_campus_real_1788194089427.jpg';
 import pygenarcBrandImage from '../assets/images/WhatsApp Image 2026-09-09 at 9.58.19 PM.jpeg';
 import hodimage from '../assets/images/hod.jpeg';
+import labimg from '../assets/images/lab.jpeg';
+import deptimg from '../assets/images/dept.jpeg';
+
+
 export const AboutSection: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'college' | 'ksgi' | 'dept' | 'vision' | 'campus'>('college');
 
@@ -80,7 +84,7 @@ export const AboutSection: React.FC = () => {
                   Education has evolved, but institutions still struggle with scattered systems and manual workloads. PyGenicArc integrates AI, Cloud, and Virtual Labs into one harmonized ecosystem, eliminating hardware limits and making accreditation audit-ready.
                 </p>
               </div>
-              <div className="relative rounded-2xl overflow-hidden border border-cyan-500/30 shadow-2xl bg-slate-950/70 p-8 text-center">
+              <div className="relative rounded-2xl overflow-hidden  p-8 text-center">
                 <img
                   src={pygenarcBrandImage}
                   alt="PyGenicArc - AI, Cloud, and Virtual Labs"
@@ -213,10 +217,10 @@ export const AboutSection: React.FC = () => {
               <h3 className="text-xl font-bold text-white">KSSEM Infrastructure & Hackathon Amenities</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 <div className="group relative rounded-xl overflow-hidden border border-slate-700 h-48">
-                  <img src="https://kssem.edu.in/img/library/slider/slide-5.jpg" alt="KSSEM CSE Computing Labs" referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                  <img src={deptimg} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent p-4 flex flex-col justify-end">
-                    <span className="font-bold text-white text-sm">KSSEM Seminar Hall</span>
-                    <span className="text-xs text-pink-300">A modern, well-lit auditorium filled with students and faculty attending an engaging academic presentation and interactive guest session.</span>
+                    <span className="font-bold text-white text-sm">Dept. of Computer Science & Engineering</span>
+                    <span className="text-xs text-pink-300">The CSE Department at KSSEM blends academic excellence, innovation, and industry exposure to nurture future-ready professionals.</span>
                   </div>
                 </div>
 
@@ -229,7 +233,7 @@ export const AboutSection: React.FC = () => {
                 </div>
 
                 <div className="group relative rounded-xl overflow-hidden border border-slate-700 h-48">
-                  <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRaJg_3wUYTxbkPbbh3BIFttd3kSLY1iW0JUlCDJGi3Y-3rEMNmXQv2vsU&s=10" alt="Dining Hall" referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                  <img src={labimg} alt="Dining Hall" referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent p-4 flex flex-col justify-end">
                     <span className="font-bold text-white text-sm">Hi-Tech Computer Laboratory</span>
                     <span className="text-xs text-emerald-300">A state-of-the-art computer facility equipped with high-performance systems and modern infrastructure designed to support hands-on learning and practical workshops.</span>

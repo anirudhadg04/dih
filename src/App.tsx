@@ -19,9 +19,9 @@ import { Heart, Globe, ArrowUp } from 'lucide-react';
 
 export default function App() {
   const getViewFromPath = (path: string): PortalView => {
-    const normalizedPath = path.toLowerCase();
-    if (normalizedPath === '/admin') return 'admin';
-    if (normalizedPath === '/participant') return 'participant';
+    const normalizedPath = path.toLowerCase().replace(/\/+$/, '') || '/';
+    if (normalizedPath === '/admin' || normalizedPath.startsWith('/admin/')) return 'admin';
+    if (normalizedPath === '/participant' || normalizedPath.startsWith('/participant/')) return 'participant';
     return 'landing';
   };
 

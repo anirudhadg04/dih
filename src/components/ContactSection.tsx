@@ -144,7 +144,7 @@ export const ContactSection: React.FC = () => {
             <div className="rounded-2xl overflow-hidden border border-slate-700 h-52 relative shadow-lg">
               <iframe
                 title="KSSEM Campus Location Map"
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3889.600984180436!2d77.54580007584109!3d12.869046617132147!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bae406560965c79%3A0x6b4f7a26f3764b8a!2sK.S.%20School%20of%20Engineering%20and%20Management!5e0!3m2!1sen!2sin!4v1700000000000!5m2!1sen!2sin"
+                src="https://maps.google.com/maps?width=588&amp;height=377&amp;hl=en&amp;q=k s school of engineering and management&amp;t=&amp;z=16&amp;ie=UTF8&amp;iwloc=B&amp;output=embed"
                 className="w-full h-full border-0 filter grayscale opacity-90 contrast-125 hover:grayscale-0 transition-all duration-500"
                 allowFullScreen={false}
                 loading="lazy"

@@ -2,9 +2,6 @@ import { neon } from '@neondatabase/serverless';
 import type { Team } from '../types';
 
 const databaseUrl = String(process.env.DATABASE_URL || '').trim();
-if (process.env.VERCEL && !databaseUrl) {
-  throw new Error('DATABASE_URL must be configured for Vercel production deployments.');
-}
 const sql = databaseUrl ? neon(databaseUrl) : null;
 
 export const productionStoreEnabled = Boolean(sql);

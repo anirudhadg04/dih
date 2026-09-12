@@ -17,6 +17,7 @@ import { SEED_ANNOUNCEMENTS, SPONSORS } from "./src/data/mockData";
 import { Team, ProjectSubmission, JudgeScorecard, Announcement, SupportTicket, Participant, MilestoneReport, MentorBooking, WebsiteCMSConfig, AuditLog, AdminUser, AdminRole, RulebookVersion, EmailCampaign, RoomAllocation, JudgingRound, ScheduleItem, Checkpoint, Sponsor } from "./src/types";
 import { HACKATHON_TRACKS } from "./src/data/mockData";
 import { PAYMENT_UPI_ID, ocrContainsTransactionId } from "./src/utils/upiVerification";
+import { resolveAdminBootstrapPassword } from "./src/utils/adminAuth";
 import { ensureProductionSchema, findProductionDuplicate, loadProductionTeams, productionStoreEnabled, saveProductionTeam, updateProductionTeam, deleteProductionTeam } from "./src/server/productionStore";
 
 const execFileAsync = promisify(execFile);
@@ -487,10 +488,7 @@ export async function startServer(options: { listen?: boolean } = {}) {
 
   const AUTH_COOKIE = "anvation_session";
   const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-  const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_BOOTSTRAP_PASSWORD || "change-me-in-dev-only";
-  if (process.env.VERCEL && !process.env.ADMIN_BOOTSTRAP_PASSWORD) {
-    throw new Error("ADMIN_BOOTSTRAP_PASSWORD must be configured for Vercel production deployments.");
-  }
+  const DEFAULT_ADMIN_PASSWORD = resolveAdminBootstrapPassword();
   const sessionStore = new Map<string, { user: { id: string; type: "admin" | "participant"; role?: string; email?: string; username?: string; name?: string; teamId?: string; expiresAt: number; }; expiresAt: number }>();
   const passwordResetTokens = new Map<string, { teamId: string; expiresAt: number }>();
   const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000;
